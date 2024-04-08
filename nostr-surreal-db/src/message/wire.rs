@@ -70,35 +70,32 @@ pub struct FilterOnWire {
 }
 
 pub fn parse_filter_tags(raw_tags: HashMap<String, Value>) -> Result<
-    HashMap< Vec<u8>, Vec<Vec<u8>> > 
+    HashMap< String, Vec<String> > 
 > {
     let mut tags = HashMap::new();
-    for item in raw_tags {
-        let key = item.0;
-        if let Some(key) = key.strip_prefix('#') {
-            let key = key.as_bytes();
-            // only index for key len 1
-            if key.len() == 1 {
-                let val = Vec::<String>::deserialize(&item.1)?;
-                let mut list = vec![];
-                for s in val {
-                    if key == b"e" || key == b"p" {
-                        let h = hex::decode(&s)?;
-                        if h.len() != 32 {
-                            // ignore
-                            return Err(anyhow!("invalid e or p tag value"));
-                        } else {
-                            list.push(h);
-                        }
-                    } else {
-                        list.push(s.into_bytes());
+    for (raw_key, raw_value) in raw_tags {
+        if let Some(key) = raw_key.strip_prefix('#') {
+            // only index key with len == 1
+            if key.as_bytes().len() != 1 {
+                continue;
+            }
+
+            let val = Vec::<String>::deserialize(&raw_value)?;
+            let mut list = vec![];
+            for s in val {
+                if key == "e" || key == "p" {
+                    let h = hex::decode(&s)?;
+                    if h.len() != 32 {
+                        return Err(anyhow!("invalid e or p tag value"));
                     }
                 }
-                if !list.is_empty() {
-                    list.sort();
-                    list.dedup();
-                    tags.insert(key.to_vec(), list.into());
-                }
+
+                list.push(s);
+            }
+            if !list.is_empty() {
+                list.sort();
+                list.dedup();
+                tags.insert(key.to_string(), list.into());
             }
         }
     }

@@ -6,4 +6,4 @@ pub type Timestamp = u64;
 pub type Nonce = u64;
 pub type Bytes32 = [u8; 32];
 pub type Kind = u64;
-pub type Tags = Vec<(Vec<u8>, Vec<u8>)>;
+pub type Tags = Vec<(String, String)>;

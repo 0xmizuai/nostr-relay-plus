@@ -108,7 +108,7 @@ mod tests {
 
         let sender = Sender::ContractAddress((1, address!("0000000000000000000000000000000000000000")));
         let serialized = serde_json::to_string(&sender).unwrap();
-        assert_eq!(serialized, "\"02000000000000010000000000000000000000000000000000000000\"");
+        assert_eq!(serialized, "\"02000000010000000000000000000000000000000000000000000000\"");
 
         let sender = Sender::Ens([0; 32]);
         let serialized = serde_json::to_string(&sender).unwrap();

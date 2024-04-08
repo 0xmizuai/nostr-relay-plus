@@ -38,11 +38,10 @@ impl LocalState {
                     .collect::<Vec<_>>();
 
                 // TODO: DBReadHook 
-                let messages = self.global_state.db.query_by_filters(&filters).await?
+                let messages = self.global_state.db.query_by_filter(&filters[0]).await?
                     .iter()
                     .map(|e| {  
-                        let e_str = e.raw_event.clone();
-                        Notice::message(e_str)
+                        Notice::message(hex::encode(e.id))
                     })
                     .collect::<Vec<_>>();
 

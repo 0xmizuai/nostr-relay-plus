@@ -8,7 +8,7 @@ use surrealdb::engine::remote::ws::{Client, Ws, Wss};
 use surrealdb::opt::auth::Root;
 use surrealdb::Surreal;
 
-use crate::types::NOSTR_EVENTS_TABLE;
+use crate::types::{NOSTR_EVENTS_TABLE, NOSTR_TAGS_TABLE};
 
 pub fn get_current_timstamp() -> u64 {
     std::time::SystemTime::now()
@@ -59,6 +59,7 @@ impl DB {
     pub async fn clear_db(&self) -> Result<()> {
         self.db.query(format!("
             DELETE {NOSTR_EVENTS_TABLE};
+            DELETE {NOSTR_TAGS_TABLE};
         ")).await?;
         Ok(())
     }

@@ -17,7 +17,7 @@ pub struct Filter {
     pub until: Option<u64>,
     pub limit: Option<u64>,
 
-    pub tags: HashMap<Vec<u8>, Vec<Vec<u8>> >,
+    pub tags: HashMap<String, Vec<String> >,
 }
 
 impl TryFrom<FilterOnWire> for Filter {
@@ -82,8 +82,7 @@ impl Filter {
             return false;
         }
 
-        // all tag must match
-        let match_one_tag = |event_tags: &Tags, name: &[u8], list: &[Vec<u8>]| {
+        let match_one_tag = |event_tags: &Tags, name: &str, list: &[String]| {
             for tag in event_tags {
                 if tag.0 == name && list.contains(&tag.1) {
                     return true;
@@ -93,6 +92,7 @@ impl Filter {
             false
         };
 
+        // all tag must match
         for tag in self.tags.iter() {
             if !match_one_tag(&event_tags, tag.0, &tag.1) {
                 return false;
@@ -105,6 +105,7 @@ impl Filter {
 
 #[cfg(test)]
 mod tests {
+    use alloy_primitives::address;
     use anyhow::Result;
 
     use super::*;
@@ -123,7 +124,7 @@ mod tests {
         let note = r###"
         {
             "ids": ["abababababababababababababababababababababababababababababababab", "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd", "1212121212121212121212121212121212121212121212121212121212121212"],
-            "authors": ["00abababababababababababababababababababababababababababababababab", "00cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd", "001212121212121212121212121212121212121212121212121212121212121212"],
+            "authors": ["010000000000000000000000000000000000000000000000"],
             "kinds": [2, 1],
             "until": 5,
             "since": 3,
@@ -141,14 +142,9 @@ mod tests {
 
         let li = vec![[0x12u8; 32], [0xabu8; 32], [0xcdu8; 32]];
         let senders = vec![
-            Sender::SchnorrPubKey([0x12u8; 32]),
-            Sender::SchnorrPubKey([0xabu8; 32]),
-            Sender::SchnorrPubKey([0xcdu8; 32]),
+            Sender::EoaAddress(address!("0000000000000000000000000000000000000000")),
         ];
-        let mut tags = ["ab", "cd", "12"]
-            .iter()
-            .map(|s| s.as_bytes().to_vec())
-            .collect::<Vec<_>>();
+        let mut tags = ["ab".to_string(), "cd".to_string(), "12".to_string()].to_vec();
         tags.sort();
         assert_eq!(&filter.ids, &li);
         assert_eq!(&filter.authors, &senders);
@@ -158,24 +154,12 @@ mod tests {
         assert_eq!(filter.limit, Some(6));
 
         // tag
-        assert_eq!(
-            &filter.tags.get(&"d".to_string().into_bytes()),
-            &Some(&tags)
-        );
+        assert_eq!(filter.tags.get("d"), Some(&tags));
         // dup
-        assert_eq!(
-            &filter.tags.get(&"f".to_string().into_bytes()),
-            &Some(&tags)
-        );
-        assert!(filter
-            .tags
-            .get(&"invalid".to_string().into_bytes())
-            .is_none());
-        assert!(filter
-            .tags
-            .get(&"_invalid".to_string().into_bytes())
-            .is_none());
-        assert!(filter.tags.get(&"b".to_string().into_bytes()).is_none());
+        assert_eq!(filter.tags.get("f"), Some(&tags));
+        assert!(filter.tags.get("invalid").is_none());
+        assert!(filter.tags.get("_invalid").is_none());
+        assert!(filter.tags.get("b").is_none());
 
         // invalid
         let note = r###"
@@ -205,16 +189,8 @@ mod tests {
         "###;
         let filter: FilterOnWire = serde_json::from_str(note)?;
         let filter: Filter = filter.try_into()?;
-        assert!(filter
-            .tags
-            .get(&b"e".to_vec())
-            .unwrap()
-            .contains(&vec![0u8; 32]));
-        assert!(filter
-            .tags
-            .get(&b"p".to_vec())
-            .unwrap()
-            .contains(&vec![0u8; 32]));
+        assert!(filter.tags.get("e").unwrap().contains(&"0000000000000000000000000000000000000000000000000000000000000000".to_string()));
+        assert!(filter.tags.get("p").unwrap().contains(&"0000000000000000000000000000000000000000000000000000000000000000".to_string()));
         Ok(())
     }
 
@@ -225,6 +201,8 @@ mod tests {
     ) -> Result<()> {
         let filter: FilterOnWire = serde_json::from_str(s)?;
         let filter: Filter = filter.try_into()?;
+
+        println!("{:?}", filter);
         assert_eq!(event.match_filter(&filter), matched);
         Ok(())
     }
@@ -235,9 +213,9 @@ mod tests {
         {
             "content": "Good morning everyone 😃",
             "created_at": 1680690006,
-            "id": "50f18aa4d899a81492393909916210ccf0f3e7f58c59436a18c0a078bbb46abd",
+            "id": "eb91d677875863c5719e54c8f2841930616464d06f9c791e808bf000d398906d",
             "kind": 1,
-            "sender": "007abf57d516b1ff7308ca3bd5650ea6a4674d469c7c5057b1d005fb13d218bfef",
+            "sender": "010000000000000000000000000000000000000000000000",
             "sig": "ef4ff4f69ac387239eb1401fb07d7a44a5d5d57127e0dc3466a0403cf7d5486b668608ebfcbe9ff1f8d3b5d710545999fe08ee767284ec0b474e4cf92537678f",
             "tags": [["t", "nostr"], ["t", ""], ["expiration", "1"], ["delegation", "8e0d3d3eb2881ec137a11debe736a9086715a8c8beeeda615780064d68bc25dd"]]
           }
@@ -257,8 +235,8 @@ mod tests {
         check_match(
             r###"
         {
-            "ids": ["50f18aa4d899a81492393909916210ccf0f3e7f58c59436a18c0a078bbb46abd", "0000000000000000000000000000000000000000000000000000000000000000"],
-            "authors": ["007abf57d516b1ff7308ca3bd5650ea6a4674d469c7c5057b1d005fb13d218bfef", "000000000000000000000000000000000000000000000000000000000000000000"],
+            "ids": ["eb91d677875863c5719e54c8f2841930616464d06f9c791e808bf000d398906d", "0000000000000000000000000000000000000000000000000000000000000000"],
+            "authors": ["010000000000000000000000000000000000000000000000", "000000000000000000000000000000000000000000000000000000000000000000000000"],
             "kind": [1, 2],
             "#t": ["nostr", "other"],
             "#subject": ["db", "other"],
@@ -294,7 +272,7 @@ mod tests {
         check_match(
             r###"
         {
-            "ids": ["50f18aa4d899a81492393909916210ccf0f3e7f58c59436a18c0a078bbb46abd"]
+            "ids": ["eb91d677875863c5719e54c8f2841930616464d06f9c791e808bf000d398906d"]
         }
         "###,
             true,
