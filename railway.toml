@@ -1,0 +1,9 @@
+[build]
+builder = "nixpacks"
+buildCommand = "cargo build --release"
+
+[deploy]
+startCommand = "cargo run -p nostr-relay --release"
+healthcheckPath = "/health"
+healthcheckTimeout = 100
+restartPolicyType = "never"

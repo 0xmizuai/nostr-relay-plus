@@ -1,0 +1,35 @@
+[package]
+name = "nostr-crypto"
+version = "0.1.0"
+authors = ["Song Z <songz@duck.com>"]
+edition = "2021"
+description = "crypto utility for nostr"
+readme = "README.md"
+repository = "https://github.com/"
+license-file = "LICENSE"
+
+[dependencies]
+anyhow = { workspace = true }
+rand = { workspace = true }
+log = { workspace = true }
+hex = { workspace = true }
+num = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+alloy-primitives = { workspace = true }
+
+alloy-signer = { git = "https://github.com/alloy-rs/alloy.git",rev = "28cab90c70ef2df16571e1ec131aebbba7bc4412" }
+alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy.git",rev = "28cab90c70ef2df16571e1ec131aebbba7bc4412" }
+
+sha2 = "0.10"
+xsalsa20poly1305 = "0.9"
+base64 = "0.13.0"
+p256 = "0.13"
+elliptic-curve = "0.13"
+tiny-keccak = { version = "2", features = ["keccak"] }
+
+[dev-dependencies]
+hex = "0.4.3"
+
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+getrandom = { version = "0.2", default-features = false, features = ["js"] }

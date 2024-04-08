@@ -1,0 +1,37 @@
+[profile.release]
+panic = 'unwind'
+opt-level = 3
+
+[profile.bench]
+opt-level = 3
+
+[profile.test]
+opt-level = 1
+
+[workspace]
+resolver = "2"
+members = [
+    'nostr-crypto',
+    'nostr-surreal-db',
+    'nostr-relay',    
+]
+
+[workspace.dependencies]
+alloy-primitives = { version = "0.6", features = ["serde"] }
+
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+anyhow = "1"
+
+log = "0.4"
+env_logger = "0.11"
+
+rand = "0.8"
+rand_core = "0.6"
+
+hex = { version = "0.4.3", features = ["serde"] }
+num = "0.4"

@@ -1,0 +1,36 @@
+[package]
+name = "nostr-relay"
+version = "0.1.0"
+authors = ["Song Z <songz@duck.com>"]
+edition = "2021"
+description = "utility on ethereum for Mizu"
+readme = "README.md"
+repository = "https://github.com/"
+license-file = "LICENSE"
+
+[dependencies]
+anyhow = { workspace = true }
+log = { workspace = true }
+hex = { workspace = true }
+num = { workspace = true }
+env_logger = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+serde_json = { workspace = true }
+alloy-primitives = { workspace = true }
+
+axum = { version = "0.7", features = ["ws"]}
+axum-extra = { version = "0.9", features = ["typed-header"]}
+tower-http = { version = "0.5.0", features = ["fs", "trace", "cors"] }
+nostr-crypto = { path = "../nostr-crypto" }
+nostr-surreal-db = { path = "../nostr-surreal-db" }
+
+tracing = "0.1.37"
+tracing-appender = "0.2.2"
+tracing-subscriber = { version = "0.3", features = ["json"] }
+
+rand = { workpace = true }
+
+[features]
+default = []
