@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use nostr_surreal_db::message::{events::Event, notice::Notice};
 
-use crate::{message::IncomingMessage, util::wrap_ws_message};
+use crate::{local::hooks::LocalStateHooks, message::IncomingMessage, util::wrap_ws_message};
 
 use super::LocalState;
 
@@ -16,40 +16,53 @@ impl LocalState {
     }
 
 
-    pub async fn handle_incoming_message(&self, incoming_message: IncomingMessage) -> Result<()> {
+    pub async fn handle_incoming_message(&mut self, incoming_message: IncomingMessage) -> Result<()> {
         match incoming_message {
             IncomingMessage::Event(event) => {
-                let e = event.try_into()?;
+                let e: Event = event.try_into()?;
+                e.validate()?;
 
-                // TODO: DBWriteHook
-                // validate signature and if valid to be written into db
-                println!("Writing Event to db");
-                self.global_state.db.write_event(&e).await?;
-                println!("Done Writing Event to db");
-                // TODO: BroadcastHook
-                self.global_state.global_events_pub_sender.send(e)?;
+                if self.auth_on_db_write(&e) {
+                    tracing::debug!(
+                        "Writing Event ID {} to db on IP {:?}", 
+                        hex::encode(e.id), 
+                        self.client_ip_addr
+                    );
+                    self.global_state.db.write_event(&e).await?;
+                    tracing::debug!("Done Writing Event to db");
+                }
 
+                if self.auth_on_send_global_broadcast_event(&e) {
+                    self.global_state.global_events_pub_sender.send(e)?;
+                }
             },
             IncomingMessage::Req(sub) => {
                 // 1. send the initial filter
-                let filters = sub.filters
-                    .iter()
-                    .map(|f| f.clone().try_into().unwrap())
-                    .collect::<Vec<_>>();
+                let filter = sub.clone().filter.try_into()?;
 
-                // TODO: DBReadHook 
-                let messages = self.global_state.db.query_by_filter(&filters[0]).await?
-                    .iter()
-                    .map(|e| {  
-                        Notice::message(hex::encode(e.id))
-                    })
-                    .collect::<Vec<_>>();
+                let messages = if self.auth_on_db_read() {
+                    self.global_state.db.query_by_filter(&filter).await?
+                        .iter()
+                        .map(|e| {  
+                            Notice::message(hex::encode(e.id))
+                        })
+                        .collect::<Vec<_>>()
+                } else { Vec::new() };
 
-                // TODO: SubHook
                 for msg in messages {
                     self.outgoing_sender.send(msg).await?;
                 }
+
+                self.subscribe(sub)?;
             },
+            IncomingMessage::Auth(auth) => {
+                // 1. validate the challenge
+                let event: Event = auth.try_into()?;
+                let content = hex::decode(event.content)?;
+                
+
+            }
+
             _ => { 
                 println!("{:?}", incoming_message); 
             }

@@ -31,15 +31,15 @@ impl AlloyWallet {
         Ok(self.wallet.sign_hash_sync(digest.into())?)
     }
 
-    pub fn ec_recover_hash(&self, digest: &[u8; 32], signature: &Signature) -> Result<Address> {
-        Ok(signature.recover_address_from_prehash(digest.into())?)
-    }
-
     pub fn sign_message(&self, message: &[u8]) -> Result<Signature> {
         Ok(self.wallet.sign_message_sync(message)?)
     }
 
-    pub fn ec_recover_message(&self, message: &[u8], signature: &Signature) -> Result<Address> {
+    pub fn ec_recover_hash(digest: &[u8; 32], signature: &Signature) -> Result<Address> {
+        Ok(signature.recover_address_from_prehash(digest.into())?)
+    }
+
+    pub fn ec_recover_message(message: &[u8], signature: &Signature) -> Result<Address> {
         Ok(signature.recover_address_from_msg(message)?)
     }
 }
@@ -64,8 +64,8 @@ mod tests {
         let sig_digest = wallet.sign_digest(&hash).unwrap();
 
         assert_eq!(sig, sig_digest);
-        assert_eq!(wallet.ec_recover_message(message, &sig).unwrap(), wallet.address());
-        assert_eq!(wallet.ec_recover_hash(&hash, &sig).unwrap(), wallet.address());
+        assert_eq!(AlloyWallet::ec_recover_message(message, &sig).unwrap(), wallet.address());
+        assert_eq!(AlloyWallet::ec_recover_hash(&hash, &sig).unwrap(), wallet.address());
     }
 
 }
