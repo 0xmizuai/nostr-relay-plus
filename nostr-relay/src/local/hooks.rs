@@ -7,7 +7,7 @@ pub trait LocalStateHooks {
     fn auth_on_db_read(&self) -> bool;
 
     fn auth_on_send_global_broadcast_event(&self, e: &Event) -> bool;
-    fn auth_on_receive_global_boradcast_event(&self) -> bool;
+    fn auth_on_receive_global_boradcast_event(&self, e: &Event) -> bool;
 }
 
 impl LocalStateHooks for LocalState {
@@ -23,7 +23,7 @@ impl LocalStateHooks for LocalState {
         true
     }
 
-    fn auth_on_receive_global_boradcast_event(&self) -> bool {
+    fn auth_on_receive_global_boradcast_event(&self, _e: &Event) -> bool {
         true
     }
 }

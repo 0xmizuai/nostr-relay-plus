@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use nostr_surreal_db::message::{events::Event, notice::Notice};
+use nostr_surreal_db::message::{events::Event, filter::Filter, notice::Notice};
 
 use crate::{local::hooks::LocalStateHooks, message::IncomingMessage, util::wrap_ws_message};
 
@@ -32,19 +32,19 @@ impl LocalState {
                     tracing::debug!("Done Writing Event to db");
                 }
 
+                self.outgoing_sender.send(Notice::saved(hex::encode(e.id))).await?;
+
                 if self.auth_on_send_global_broadcast_event(&e) {
                     self.global_state.global_events_pub_sender.send(e)?;
                 }
             },
             IncomingMessage::Req(sub) => {
-                // 1. send the initial filter
-                let filter = sub.clone().filter.try_into()?;
-
+                let filters = sub.parse_filters()?;
                 let messages = if self.auth_on_db_read() {
-                    self.global_state.db.query_by_filter(&filter).await?
+                    self.global_state.db.query_by_filters(&filters).await?
                         .iter()
                         .map(|e| {  
-                            Notice::message(hex::encode(e.id))
+                            Notice::message(serde_json::to_string(e).unwrap())
                         })
                         .collect::<Vec<_>>()
                 } else { Vec::new() };
@@ -56,10 +56,12 @@ impl LocalState {
                 self.subscribe(sub)?;
             },
             IncomingMessage::Auth(auth) => {
+                println!("{:?}", auth);
+
                 // 1. validate the challenge
-                let event: Event = auth.try_into()?;
-                let content = hex::decode(event.content)?;
-                
+                // let event: Event = auth.try_into()?;
+                // let content = hex::decode(event.content)?;
+
 
             }
 
@@ -70,12 +72,13 @@ impl LocalState {
         Ok(())
     }
 
-    pub async fn handle_global_incoming_events(&self, event: Event) -> Result<()> {
-        // 1. send the event to the client
-        // TODO: check is interested
+    pub async fn handle_global_incoming_events(&self, event: Event) -> Result<String> {
+        let id = self.is_interested(&event)?;
+        let notice = Notice::message(serde_json::to_string(&event)?);
+        self.outgoing_sender.send(notice).await?;
 
         println!("{:?}", event);
-        Ok(())
+        Ok(id)
     }
 
 }

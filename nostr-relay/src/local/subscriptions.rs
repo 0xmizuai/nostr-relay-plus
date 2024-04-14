@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
-use nostr_surreal_db::message::subscription::Subscription;
+use nostr_surreal_db::message::{events::Event, subscription::Subscription};
 
 use super::LocalState;
 
@@ -14,6 +14,15 @@ impl LocalState {
     #[must_use]
     pub fn subscriptions(&self) -> &HashMap<String, Subscription> {
         &self.subscriptions
+    }
+
+    pub fn is_interested(&self, e: &Event) -> Result<String> {
+        for (id, sub) in self.subscriptions.iter() {
+            if sub.is_interested(&e).is_ok() {
+                return Ok(id.clone());
+            }
+        }
+        Err(anyhow!("not interested"))
     }
 
     /// Check if the given subscription already exists

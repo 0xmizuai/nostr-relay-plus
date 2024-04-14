@@ -1,12 +1,10 @@
 use std::net::SocketAddr;
 
-use axum::extract::ws::{self, Message, WebSocket};
+use axum::extract::ws::WebSocket;
 use futures::{SinkExt, StreamExt};
-use nostr_surreal_db::{message::{events::Event, filter::Filter, notice::Notice}, DB};
-use tokio::{select, sync::{broadcast, mpsc, oneshot}};
+use tokio::{select, sync::mpsc};
 
 use crate::{local::LocalState, util::wrap_error_message};
-use crate::message::{IncomingMessage, OutgoingMessage};
 use crate::GlobalState;
 use crate::util::{wrap_ws_message, unwrap_ws_message};
 

@@ -25,16 +25,16 @@ impl DB {
         Ok(())
     }
 
-    pub async fn query_by_filter(&self, filter: &Filter) -> Result<Vec<Event>> {
+    pub async fn query_by_filters(&self, filters: &[Filter]) -> Result<Vec<Event>> {
         let sql = SqlBuilder::new()
-            .get_events_by_filter(filter)
+            .get_events_by_filters(&filters)
             .build();
 
         let events = self.db
             .query(sql).await?
             .take::<Vec<Event>>(0)?
             .iter()
-            .filter(|event| event.match_filter(filter))
+            .filter(|event| event.match_filters(&filters))
             .map(|e| e.clone())
             .collect::<Vec<_>>();
 
@@ -92,7 +92,7 @@ mod tests {
         let filter: Filter = filter.try_into().unwrap();
 
         let db = DB::local_connect().await.unwrap();
-        let res = db.query_by_filter(&filter).await.unwrap();
+        let res = db.query_by_filters(&[filter]).await.unwrap();
         assert_eq!(res.len(), 1);
     }
 
@@ -106,7 +106,7 @@ mod tests {
         let filter: Filter = filter.try_into().unwrap();
 
         let db = DB::local_connect().await.unwrap();
-        let res = db.query_by_filter(&filter).await.unwrap();
+        let res = db.query_by_filters(&[filter]).await.unwrap();
         assert_eq!(res.len(), 1);
     }
 
@@ -121,7 +121,7 @@ mod tests {
         let filter: Filter = filter.try_into().unwrap();
 
         let db = DB::local_connect().await.unwrap();
-        let res = db.query_by_filter(&filter).await.unwrap();
+        let res = db.query_by_filters(&[filter]).await.unwrap();
         assert_eq!(res.len(), 1);
     }
 
@@ -136,7 +136,7 @@ mod tests {
         let filter: Filter = filter.try_into().unwrap();
 
         let db = DB::local_connect().await.unwrap();
-        let res = db.query_by_filter(&filter).await.unwrap();
+        let res = db.query_by_filters(&[filter]).await.unwrap();
         assert_eq!(res.len(), 0);
     }
 
@@ -152,7 +152,7 @@ mod tests {
         let filter: Filter = filter.try_into().unwrap();
 
         let db = DB::local_connect().await.unwrap();
-        let res = db.query_by_filter(&filter).await.unwrap();
+        let res = db.query_by_filters(&[filter]).await.unwrap();
         assert_eq!(res.len(), 0);
     }
 
@@ -167,7 +167,7 @@ mod tests {
         let filter: Filter = filter.try_into().unwrap();
 
         let db = DB::local_connect().await.unwrap();
-        let res = db.query_by_filter(&filter).await.unwrap();
+        let res = db.query_by_filters(&[filter]).await.unwrap();
         assert_eq!(res.len(), 0);
     }
 }

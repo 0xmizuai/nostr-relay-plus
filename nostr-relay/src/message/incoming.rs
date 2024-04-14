@@ -51,8 +51,8 @@ impl<'de> Visitor<'de> for MessageVisitor {
                 let t = seq
                     .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(0, &self))?;
-                let r = FilterOnWire::deserialize(de::value::SeqAccessDeserializer::new(seq))?;
-                Ok(IncomingMessage::Req(Subscription { id: t, filter: r }))
+                let r = Vec::<FilterOnWire>::deserialize(de::value::SeqAccessDeserializer::new(seq))?;
+                Ok(IncomingMessage::Req(Subscription { id: t, filters: r }))
             }
             "AUTH" => Ok(IncomingMessage::Auth(
                 seq.next_element()?
@@ -62,8 +62,8 @@ impl<'de> Visitor<'de> for MessageVisitor {
                 let t = seq
                     .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(0, &self))?;
-                let r = FilterOnWire::deserialize(de::value::SeqAccessDeserializer::new(seq))?;
-                Ok(IncomingMessage::Count(Subscription { id: t, filter: r }))
+                let r = Vec::<FilterOnWire>::deserialize(de::value::SeqAccessDeserializer::new(seq))?;
+                Ok(IncomingMessage::Count(Subscription { id: t, filters: r }))
             }
             _ => Ok(IncomingMessage::Unknown(
                 t.to_string(),

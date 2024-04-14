@@ -120,12 +120,7 @@ impl SqlBuilder {
         self
     }
 
-    pub fn get_events_by_filter(&mut self, filter: &Filter) -> &mut Self {
-        // TODO: we are skipping tags for now ... as it is very complicated
-        // Instead, we check on the results from the other queries
-
-        let mut sql = format!("SELECT *, meta::id(id) as id FROM {NOSTR_EVENTS_TABLE} WHERE ");
-
+    fn build_one_filter(filter: Filter) -> Vec<String> {
         let mut filter_query = Vec::new();
 
         let mut id_filter = Vec::new();
@@ -175,9 +170,31 @@ impl SqlBuilder {
             }
         };
 
-        filter_query.push(the_time_query);
-        
-        sql.push_str(&filter_query.join(" AND "));
+        filter_query.push(the_time_query);   
+
+        filter_query
+    }
+
+    pub fn get_events_by_filters(&mut self, filters: &[Filter]) -> &mut Self {
+        // TODO: we are skipping tags for now ... as it is very complicated
+        // Instead, we check on the results from the other queries
+        assert!(filters.len() > 0);
+
+        let mut sql = format!("SELECT *, meta::id(id) as id FROM {NOSTR_EVENTS_TABLE} WHERE ");
+        let mut all_filter_queries = Vec::new();
+        for filter in filters {
+            let filter_query = Self::build_one_filter(filter.clone());
+            all_filter_queries.push(filter_query.join(" AND "));
+        }
+
+        if all_filter_queries.len() > 0 {
+            let all_filter_query = all_filter_queries.iter()
+                .map(|q| format!("({q})"))
+                .collect::<Vec<String>>()
+                .join(" OR ");
+
+            sql.push_str(&all_filter_query);
+        }
         sql.push_str(";");
 
         self.push_sql(sql);
@@ -217,7 +234,7 @@ mod tests {
 
 
         let sql = SqlBuilder::new()
-            .get_events_by_filter(&filter)
+            .get_events_by_filters(&[filter])
             .build();
 
         println!("SQL {sql}");

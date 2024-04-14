@@ -104,6 +104,16 @@ impl Event {
 
         false
     }
+    
+    pub fn match_filters(&self, filters: &[Filter]) -> bool {
+        for f in filters {
+            if self.match_filter(f) {
+                return true;
+            }
+        }
+
+        false
+    }
 
     pub fn validate(&self) -> Result<()> {
         Ok(())
