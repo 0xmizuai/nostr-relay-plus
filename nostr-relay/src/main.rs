@@ -27,13 +27,13 @@ async fn main() -> Result<()> {
         .with_state(global_state);
 
     let port: u16 = std::env::var("PORT")
-        .unwrap_or("3030".into())
+        .unwrap_or("3033".into())
         .parse()
         .expect("failed to convert to number");
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}"))
         .await
         .unwrap();
-    log::info!("Listening on port 3030");
+    log::info!("Listening on port 3033");
     axum::serve(
         listener, 
         app.into_make_service_with_connect_info::<SocketAddr>()

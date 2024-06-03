@@ -46,7 +46,7 @@ impl DB {
     }
     
     pub async fn local_connect() -> Result<Self> {
-        let db = Surreal::new::<Ws>("localhost:8087").await?;
+        let db = Surreal::new::<Ws>("localhost:8081").await?;
 
         db.signin(Root { username: "root", password: "root" }).await?;
 
