@@ -13,11 +13,13 @@ resolver = "2"
 members = [
     'nostr-crypto',
     'nostr-surreal-db',
-    'nostr-relay',    
+    'nostr-relay',
+    "nostr-client-plus",
 ]
 
 [workspace.dependencies]
 alloy-primitives = { version = "0.6", features = ["serde"] }
+nostr-surreal-db = { path = "./nostr-surreal-db" }
 
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"
