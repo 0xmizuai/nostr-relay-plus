@@ -3,6 +3,7 @@ use nostr_client_plus::client::Client;
 use nostr_client_plus::event::Event;
 use nostr_client_plus::request::{Filter, Request};
 use nostr_surreal_db::message::sender::Sender;
+use std::collections::HashMap;
 use std::time::Duration;
 
 #[tokio::test]
@@ -13,17 +14,16 @@ async fn e2e() {
 
     // Prepare subscription request and send
     let filter = Filter {
-        ids: None,
-        authors: None,
-        kinds: Some(vec![1]),
-        e: None,
-        p: None,
+        ids: vec![],
+        authors: vec![],
+        kinds: vec![1],
         since: None,
         until: None,
         limit: None,
+        tags: HashMap::new(),
     };
     let req = Request::new(
-        Some("ae4788ade947b42bb8b0d89c9fbcc129c10be87043c32190a96daa9e822a9bf6"),
+        "ae4788ade947b42bb8b0d89c9fbcc129c10be87043c32190a96daa9e822a9bf6".to_string(),
         vec![filter],
     );
     client.subscribe(req).await.unwrap();

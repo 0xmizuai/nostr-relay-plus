@@ -1,8 +1,8 @@
 use crate::event::Event;
-use nostr_rust::req::Req;
+use crate::request::Request;
 
 #[derive(Debug)]
 pub enum ClientCommand {
-    Req(Req),
+    Req(Request),
     Event(Event),
 }

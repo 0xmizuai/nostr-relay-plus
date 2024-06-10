@@ -8,9 +8,9 @@ url = "2.5.0"
 tokio = {  workspace = true }
 tokio-tungstenite = "0.23.0"
 futures-util = "0.3.30"
-nostr_rust = "0.20.3"
 nostr-surreal-db = { workspace = true }
 serde_json = { workspace = true }
+serde = { workspace = true }
 
 [dev-dependencies]
 tokio = { version = "1.38.0", features = ["full", "test-util"] }
