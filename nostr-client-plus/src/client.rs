@@ -1,16 +1,12 @@
 use crate::client_command::ClientCommand;
 use crate::event::Event;
 use crate::request::Request;
+use anyhow::{anyhow, Result};
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
-
-#[derive(Debug)]
-pub enum ClientError {
-    Generic,
-}
 
 pub struct Client {
     sender: Option<Sender<ClientCommand>>,
@@ -22,7 +18,7 @@ impl Client {
         Self { sender: None }
     }
 
-    pub async fn connect(&mut self, url: &str) -> Result<(), ClientError> {
+    pub async fn connect(&mut self, url: &str) -> Result<()> {
         // If already connected, ignore. ToDo: handle this better
         // if self.relay.is_some() {
         //     return Ok(());
@@ -33,7 +29,7 @@ impl Client {
 
         let (socket, resp) = match connect_async(url).await {
             Ok((socket, response)) => (socket, response),
-            Err(_) => return Err(ClientError::Generic),
+            Err(_) => return Err(anyhow!("Cannot connect to {}", url)),
         };
         println!("Connection established: {:?}", resp);
 
@@ -72,22 +68,22 @@ impl Client {
         Ok(())
     }
 
-    pub async fn publish(&self, event: Event) -> Result<(), ClientError> {
+    pub async fn publish(&self, event: Event) -> Result<()> {
         match &self.sender {
             Some(sender) => {
-                sender.send(ClientCommand::Event(event)).await.unwrap();
+                sender.send(ClientCommand::Event(event)).await?;
             }
-            None => return Err(ClientError::Generic),
+            None => return Err(anyhow!("Publish: missing websocket")),
         }
         Ok(())
     }
 
-    pub async fn subscribe(&self, req: Request) -> Result<(), ClientError> {
+    pub async fn subscribe(&self, req: Request) -> Result<()> {
         match &self.sender {
             Some(sender) => {
-                sender.send(ClientCommand::Req(req)).await.unwrap(); // ToDo: remove unwrap
+                sender.send(ClientCommand::Req(req)).await?;
             }
-            None => return Err(ClientError::Generic),
+            None => return Err(anyhow!("Subscribe: missing websocket")),
         }
         Ok(())
     }
