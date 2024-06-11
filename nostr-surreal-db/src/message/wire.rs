@@ -41,7 +41,7 @@ impl EventOnWire {
     }
 }
 
-#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(transparent)]
 pub struct _HexString {
     #[serde(with = "hex::serde")]
@@ -54,7 +54,7 @@ impl Into<Bytes32> for _HexString {
     }
 }
 
-#[derive(Deserialize, Default, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Default, Debug, Clone, PartialEq, Eq)]
 #[serde(default)]
 pub struct FilterOnWire {
     pub ids: Vec<_HexString>,
