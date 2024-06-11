@@ -1,3 +1,4 @@
+use alloy_primitives::Address;
 use nostr_surreal_db::message::sender::Sender;
 use nostr_surreal_db::message::wire::EventOnWire;
 use nostr_surreal_db::types::{Bytes32, Timestamp};
@@ -5,10 +6,9 @@ use serde_json::json;
 use std::fmt;
 use std::fmt::Formatter;
 
-#[derive(Debug)]
-pub struct Event(EventOnWire);
+pub struct PrepareEvent(Event);
 
-impl Event {
+impl PrepareEvent {
     pub fn new(
         sender: Sender,
         created_at: Timestamp,
@@ -23,10 +23,34 @@ impl Event {
             kind,
             tags,
             content,
-            sig: vec![0, 1, 0, 1], // ToDo: implement signature properly
+            sig: Vec::new(),
         };
         event.id = event.to_id_hash();
-        Self { 0: event }
+        Self { 0: Event(event) }
+    }
+}
+
+impl PrepareEvent {
+    pub fn id(&self) -> Bytes32 {
+        self.0.id()
+    }
+
+    pub fn sign(mut self, signature: Vec<u8>) -> Event {
+        self.0.set_sig(signature);
+        self.0
+    }
+}
+
+#[derive(Debug)]
+pub struct Event(EventOnWire);
+
+impl Event {
+    pub fn id(&self) -> Bytes32 {
+        self.0.id
+    }
+
+    pub fn set_sig(&mut self, signature: Vec<u8>) {
+        self.0.sig = signature;
     }
 }
 

@@ -4,11 +4,14 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+alloy-primitives = { workspace = true }
 anyhow = { workspace = true }
 url = "2.5.0"
 tokio = {  workspace = true }
 tokio-tungstenite = "0.23.0"
 futures-util = "0.3.30"
+k256 = { workspace = true }
+nostr-crypto = { workspace = true }
 nostr-surreal-db = { workspace = true }
 serde_json = { workspace = true }
 serde = { workspace = true }

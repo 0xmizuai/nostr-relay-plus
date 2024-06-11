@@ -1,14 +1,17 @@
-use alloy_primitives::address;
 use nostr_client_plus::client::Client;
-use nostr_client_plus::event::Event;
+use nostr_client_plus::event::PrepareEvent;
 use nostr_client_plus::request::{Filter, Request};
-use nostr_surreal_db::message::sender::Sender;
+use nostr_crypto::schnorr_signer::SchnorrSigner;
+use nostr_crypto::Signer;
 use std::collections::HashMap;
 use std::time::Duration;
 
 #[tokio::test]
 async fn e2e() {
-    let mut client = Client::new();
+    // Generate signing key
+    let signer = SchnorrSigner::from_bytes(&[2; 32]).unwrap();
+
+    let mut client = Client::new(Signer::Schnorr(signer));
     client.connect("ws://127.0.0.1:3033").await.unwrap();
     tokio::time::sleep(Duration::from_secs(1)).await;
 
@@ -30,13 +33,7 @@ async fn e2e() {
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     // Prepare event and send
-    let event = Event::new(
-        Sender::EoaAddress(address!("4838B106FCe9647Bdf1E7877BF73cE8B0BAD5f98")),
-        0,
-        1,
-        vec![],
-        "Hello Rust".to_string(),
-    );
+    let event = PrepareEvent::new(client.sender(), 0, 1, vec![], "Hello Rust".to_string());
     client.publish(event).await.unwrap();
     tokio::time::sleep(Duration::from_secs(2)).await;
     assert!(true);
