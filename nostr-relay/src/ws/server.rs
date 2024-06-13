@@ -1,8 +1,9 @@
 use std::net::SocketAddr;
 
-use axum::extract::ws::WebSocket;
+use axum::extract::ws::{Message, WebSocket};
 use futures::{SinkExt, StreamExt};
 use tokio::{select, sync::mpsc};
+use tokio::time::{Duration, Instant, interval};
 
 use crate::{local::LocalState, util::wrap_error_message};
 use crate::GlobalState;
@@ -25,25 +26,53 @@ pub async fn handle_websocket_connection(
     // 2. send the initial auth request 
     local_state.start_auhentication().await;
 
+    // 3. Set ping and timeout variables (timeout must be > ping interval)
+    let mut ping_interval_timer = interval(Duration::from_secs(20));
+    let ping_timeout = Duration::from_secs(40);
+    let mut last_pong_received = Instant::now();
+
+
     // 4. start the main event loop
     loop {
         select! {
-            Some(Ok(ws_message)) = ws_receiver.next() => {
-                let maybe_incoming = unwrap_ws_message(ws_message, who);
-                if let Some(incoming) = maybe_incoming {
-                    let result = local_state.handle_incoming_message(incoming).await;
-                    println!("{:?}", result);
-                    if result.is_err() {
-                        let closing_notice = wrap_error_message("something", &result.err().unwrap());
-                        let _ = ws_sender.send(closing_notice).await;
-                        ws_sender.close().await.unwrap();
+            msg = ws_receiver.next() => match msg {
+                Some(Ok(Message::Close(_))) => {
+                    tracing::info!("Closed connection: closing our side, too");
+                    break;
+                }
+                Some(Ok(Message::Pong(_))) => last_pong_received = Instant::now(),
+                Some(Ok(ws_message)) => {
+                    let maybe_incoming = unwrap_ws_message(ws_message, who);
+                    if let Some(incoming) = maybe_incoming {
+                        let result = local_state.handle_incoming_message(incoming).await;
+                        if result.is_err() {
+                            let closing_notice = wrap_error_message("ws something", &result.err().unwrap());
+                            let _ = ws_sender.send(closing_notice).await;
+                            ws_sender.close().await.unwrap();
+                        }
                     }
                 }
+                Some(Err(e)) => tracing::error!("While receiving from websocket: {}", e),
+                None => {
+                    tracing::error!("Error on websocket: closing our side");
+                    break;
+                }
             },
+            // Send pings and close connection if not responding within time limit
+            _ = ping_interval_timer.tick() => {
+                if let Err(err) = ws_sender.send(Message::Ping(Vec::new())).await {
+                    tracing::error!("Unable to send ping: {}", err);
+                    break;
+                }
+                if Instant::now().duration_since(last_pong_received) > ping_timeout {
+                    tracing::error!("Pong timeout exceeded");
+                    break;
+                }
+            }
             Ok(event) = local_state.global_state.global_events_pub_receiver.recv() => {
                 let result = local_state.handle_global_incoming_events(event).await;
                 if result.is_err() {
-                    let closing_notice = wrap_error_message("something", &result.err().unwrap());
+                    let closing_notice = wrap_error_message("glob something", &result.err().unwrap());
                     let _ = ws_sender.send(closing_notice).await;
                     ws_sender.close().await.unwrap();
                 }
