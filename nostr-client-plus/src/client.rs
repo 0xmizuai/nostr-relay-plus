@@ -41,8 +41,14 @@ impl Client {
         let sender_clone = sender.clone();
         // Spawn listener
         tokio::spawn(async move {
-            while let Some(Ok(message)) = read.next().await {
-                println!("Received: {:?}", message);
+            while let Some(msg) = read.next().await {
+                match msg {
+                    Ok(Message::Text(message)) => println!("Received: {:?}", message),
+                    Ok(Message::Ping(_)) => {} // tungstenite handles Pong already
+                    Ok(Message::Close(_)) => println!("Server closed connection"), // ToDo: do something
+                    Ok(_) => println!("Unsupported message"),
+                    Err(err) => println!("Do something about {}", err), // ToDo: handle error
+                }
             }
         });
 
