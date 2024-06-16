@@ -9,7 +9,7 @@ use crate::types::{Bytes32, Timestamp};
 
 use super::sender::Sender;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EventOnWire {
     #[serde(with = "hex::serde")]
     pub id: Bytes32,
