@@ -7,6 +7,7 @@ use tokio::time::{Duration, Instant, interval};
 
 use crate::{local::LocalState, util::wrap_error_message};
 use crate::GlobalState;
+use crate::message::IncomingMessage;
 use crate::util::{wrap_ws_message, unwrap_ws_message};
 
 pub async fn handle_websocket_connection(
@@ -36,14 +37,8 @@ pub async fn handle_websocket_connection(
     loop {
         select! {
             msg = ws_receiver.next() => match msg {
-                Some(Ok(Message::Close(_))) => {
-                    tracing::info!("Closed connection: closing our side, too");
-                    break;
-                }
-                Some(Ok(Message::Pong(_))) => last_pong_received = Instant::now(),
-                Some(Ok(ws_message)) => {
-                    let maybe_incoming = unwrap_ws_message(ws_message, who);
-                    if let Some(incoming) = maybe_incoming {
+                Some(Ok(Message::Text(ws_message))) => {
+                    if let Ok(incoming) = serde_json::from_str(&ws_message) {
                         let result = local_state.handle_incoming_message(incoming).await;
                         if result.is_err() {
                             let closing_notice = wrap_error_message("ws something", &result.err().unwrap());
@@ -51,7 +46,25 @@ pub async fn handle_websocket_connection(
                             ws_sender.close().await.unwrap();
                         }
                     }
+                    // ToDo: do something if serde fails
                 }
+                Some(Ok(Message::Close(c))) => {
+                    if let Some(cf) = c {
+                        tracing::trace!(
+                            ">>> {} sent close with code {} and reason `{}`",
+                            who, cf.code, cf.reason
+                        );
+                    } else {
+                        tracing::trace!(">>> {} sent close", who);
+                    }
+                    tracing::trace!(">>> Closing our side, too");
+                    break;
+                }
+                Some(Ok(Message::Pong(_))) => last_pong_received = Instant::now(),
+                Some(Ok(Message::Ping(_))) => {}
+                Some(Ok(Message::Binary(d))) => {
+                    tracing::trace!(">>> {} sent {} bytes: {:?}", who, d.len(), d);
+                },
                 Some(Err(e)) => tracing::error!("While receiving from websocket: {}", e),
                 None => {
                     tracing::error!("Error on websocket: closing our side");
