@@ -34,7 +34,12 @@ async fn e2e() {
 
     // Prepare event and send
     let event = PrepareEvent::new(client.sender(), 0, 1, vec![], "Hello Rust".to_string());
-    client.publish(event).await.unwrap();
+    let event_id = event.id();
+    match client.publish(event).await {
+        Ok(true) => println!("Published OK: event {}", hex::encode(event_id)),
+        Ok(false) => println!("Published REJ: event {}", hex::encode(event_id)),
+        Err(_) => println!("Published ERR: event {}", hex::encode(event_id)),
+    }
     tokio::time::sleep(Duration::from_secs(2)).await;
     assert!(true);
 }

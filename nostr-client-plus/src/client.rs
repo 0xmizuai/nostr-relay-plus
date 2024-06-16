@@ -1,12 +1,16 @@
 use crate::client_command::ClientCommand;
 use crate::event::PrepareEvent;
 use crate::request::Request;
+use crate::wire::relay_message::RelayMessage;
 use anyhow::{anyhow, Result};
 use futures_util::{SinkExt, StreamExt};
 use nostr_crypto::Signer;
 use nostr_surreal_db::message::sender::Sender as NostrSender;
-use tokio::sync::mpsc;
-use tokio::sync::mpsc::{Receiver, Sender};
+use nostr_surreal_db::types::Bytes32;
+use std::collections::HashMap;
+use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::oneshot;
+use tokio::time::{timeout, Duration};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -43,7 +47,9 @@ impl Client {
         tokio::spawn(async move {
             while let Some(msg) = read.next().await {
                 match msg {
-                    Ok(Message::Text(message)) => println!("Received: {:?}", message),
+                    Ok(Message::Text(message)) => {
+                        Self::handle_incoming_message(message, &sender_clone).await
+                    }
                     Ok(Message::Ping(_)) => {} // tungstenite handles Pong already
                     Ok(Message::Close(_)) => println!("Server closed connection"), // ToDo: do something
                     Ok(_) => println!("Unsupported message"),
@@ -54,6 +60,9 @@ impl Client {
 
         // Spawn sender, reading commands from internal channel
         tokio::spawn(async move {
+            // Keep track of ack requests
+            let mut ack_table: HashMap<Bytes32, oneshot::Sender<bool>> = HashMap::new();
+
             while let Some(message) = receiver.recv().await {
                 println!("Command from channel {:?}", message);
                 match message {
@@ -63,10 +72,17 @@ impl Client {
                             break;
                         }
                     }
-                    ClientCommand::Event(event) => {
+                    ClientCommand::Event((event, tx)) => {
+                        // Add request to ack table
+                        let _ = &ack_table.insert(event.id(), tx); // ToDo: handle existing entries
                         if write.send(Message::from(event.to_string())).await.is_err() {
                             eprintln!("Event: websocket error"); // ToDo: do something better
                             break;
+                        }
+                    }
+                    ClientCommand::Ack((id, accept)) => {
+                        if let Some(tx) = ack_table.remove(&id) {
+                            let _ = tx.send(accept);
                         }
                     }
                 }
@@ -78,20 +94,41 @@ impl Client {
         Ok(())
     }
 
-    fn handle_incoming_message(msg: String, tx: &Sender<ClientCommand>) {
-        println!("Receive: {:?}", msg);
+    async fn handle_incoming_message(msg: String, tx: &Sender<ClientCommand>) {
+        if let Ok(incoming) = serde_json::from_str::<RelayMessage>(&msg) {
+            match incoming {
+                RelayMessage::Ok(ok_msg) => {
+                    println!("ACK: {}", serde_json::to_string(&ok_msg).unwrap());
+                    let _ = tx
+                        .send(ClientCommand::Ack((ok_msg.event_id, ok_msg.accepted)))
+                        .await;
+                }
+                _ => println!("Received: {:?}", msg),
+            }
+        }
+        // ToDo: handle error
     }
 
-    pub async fn publish(&self, event: PrepareEvent) -> Result<()> {
+    pub async fn publish(&self, event: PrepareEvent) -> Result<bool> {
         match &self.tx {
             Some(sender) => {
                 let signature = self.sign(&event.id());
                 let event = event.sign(signature);
-                sender.send(ClientCommand::Event(event)).await?;
+
+                // Prepare ACK channel
+                let (tx, rx) = oneshot::channel::<bool>();
+
+                sender.send(ClientCommand::Event((event, tx))).await?;
+
+                // Wait for ACK with timeout
+                match timeout(Duration::from_secs(20), rx).await {
+                    Ok(Ok(accepted)) => Ok(accepted),
+                    Ok(Err(_)) => Err(anyhow!("request failed")),
+                    Err(_) => Err(anyhow!("timeout")),
+                }
             }
             None => return Err(anyhow!("Publish: missing internal channel")),
         }
-        Ok(())
     }
 
     pub fn sender(&self) -> NostrSender {
