@@ -19,8 +19,9 @@ impl LocalState {
     pub async fn handle_incoming_message(&mut self, incoming_message: IncomingMessage) -> Result<()> {
         match incoming_message {
             IncomingMessage::Event(event) => {
+                event.verify()?;
                 let e: Event = event.try_into()?;
-                e.validate()?;
+                e.validate()?; // ToDo: `verify` on EventOnWire or `validate` on Event?
 
                 if self.auth_on_db_write(&e) {
                     tracing::debug!(

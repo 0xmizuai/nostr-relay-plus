@@ -39,6 +39,14 @@ impl EventOnWire {
         ]);
         sha256_hash_digests(json.to_string().as_bytes())
     }
+
+    pub fn verify(&self) -> Result<()> {
+        let expected_hash = self.to_id_hash();
+        if expected_hash != self.id {
+            return Err(anyhow!("invalid event id"));
+        }
+        self.sender.validate_signature(expected_hash, &self.sig)
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]

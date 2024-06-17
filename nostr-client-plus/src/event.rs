@@ -1,4 +1,5 @@
 use alloy_primitives::Address;
+use nostr_crypto::signer::Signer;
 use nostr_surreal_db::message::sender::Sender;
 use nostr_surreal_db::message::wire::EventOnWire;
 use nostr_surreal_db::types::{Bytes32, Timestamp};
@@ -35,7 +36,8 @@ impl PrepareEvent {
         self.0.id()
     }
 
-    pub fn sign(mut self, signature: Vec<u8>) -> Event {
+    pub fn sign<S: Signer>(mut self, signer: &S) -> Event {
+        let signature = signer.sign(&self.id());
         self.0.set_sig(signature);
         self.0
     }

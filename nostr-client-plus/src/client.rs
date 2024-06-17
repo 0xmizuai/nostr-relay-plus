@@ -4,7 +4,8 @@ use crate::request::Request;
 use crate::wire::relay_message::RelayMessage;
 use anyhow::{anyhow, Result};
 use futures_util::{SinkExt, StreamExt};
-use nostr_crypto::Signer;
+use nostr_crypto::signer::Signer;
+use nostr_crypto::SenderSigner;
 use nostr_surreal_db::message::sender::Sender as NostrSender;
 use nostr_surreal_db::types::Bytes32;
 use std::collections::HashMap;
@@ -15,13 +16,13 @@ use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 
 pub struct Client {
-    signer: Signer,
+    signer: SenderSigner,
     tx: Option<Sender<ClientCommand>>,
     // ToDo: keep track of subscriptions
 }
 
 impl Client {
-    pub fn new(signer: Signer) -> Self {
+    pub fn new(signer: SenderSigner) -> Self {
         Self { signer, tx: None }
     }
 
@@ -112,8 +113,7 @@ impl Client {
     pub async fn publish(&self, event: PrepareEvent) -> Result<bool> {
         match &self.tx {
             Some(sender) => {
-                let signature = self.sign(&event.id());
-                let event = event.sign(signature);
+                let event = event.sign(&self.signer);
 
                 // Prepare ACK channel
                 let (tx, rx) = oneshot::channel::<bool>();
@@ -133,7 +133,7 @@ impl Client {
 
     pub fn sender(&self) -> NostrSender {
         match &self.signer {
-            Signer::Schnorr(signer) => {
+            SenderSigner::Schnorr(signer) => {
                 NostrSender::SchnorrPubKey(signer.private.verifying_key().to_bytes().into())
             }
         }
@@ -141,7 +141,7 @@ impl Client {
 
     pub fn sign(&self, msg: &[u8]) -> Vec<u8> {
         match &self.signer {
-            Signer::Schnorr(signer) => signer.sign(msg).into(),
+            SenderSigner::Schnorr(signer) => signer.sign(msg).into(),
         }
     }
 

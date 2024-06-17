@@ -2,7 +2,7 @@ use nostr_client_plus::client::Client;
 use nostr_client_plus::event::PrepareEvent;
 use nostr_client_plus::request::{Filter, Request};
 use nostr_crypto::schnorr_signer::SchnorrSigner;
-use nostr_crypto::Signer;
+use nostr_crypto::SenderSigner;
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -11,7 +11,7 @@ async fn e2e() {
     // Generate signing key
     let signer = SchnorrSigner::from_bytes(&[2; 32]).unwrap();
 
-    let mut client = Client::new(Signer::Schnorr(signer));
+    let mut client = Client::new(SenderSigner::Schnorr(signer));
     client.connect("ws://127.0.0.1:3033").await.unwrap();
     tokio::time::sleep(Duration::from_secs(1)).await;
 
