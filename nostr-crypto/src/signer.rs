@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 pub trait Signer {
-    fn sign(&self, message: &[u8]) -> Vec<u8>;
+    fn try_sign(&self, message: &[u8; 32]) -> Result<Vec<u8>>;
 }
 
 pub trait Verifier {

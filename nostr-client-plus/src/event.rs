@@ -1,4 +1,4 @@
-use alloy_primitives::Address;
+use anyhow::Result;
 use nostr_crypto::signer::Signer;
 use nostr_surreal_db::message::sender::Sender;
 use nostr_surreal_db::message::wire::EventOnWire;
@@ -36,10 +36,10 @@ impl UnsignedEvent {
         self.0.id()
     }
 
-    pub fn sign<S: Signer>(mut self, signer: &S) -> Event {
-        let signature = signer.sign(&self.id());
+    pub fn sign<S: Signer>(mut self, signer: &S) -> Result<Event> {
+        let signature = signer.try_sign(&self.id())?;
         self.0.set_sig(signature);
-        self.0
+        Ok(self.0)
     }
 }
 

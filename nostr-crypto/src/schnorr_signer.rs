@@ -19,8 +19,8 @@ impl SchnorrSigner {
 }
 
 impl Signer for SchnorrSigner {
-    fn sign(&self, message: &[u8]) -> Vec<u8> {
-        self.private.sign(message).to_bytes().into()
+    fn try_sign(&self, message: &[u8; 32]) -> Result<Vec<u8>> {
+        Ok(self.private.try_sign(message)?.to_bytes().into())
     }
 }
 

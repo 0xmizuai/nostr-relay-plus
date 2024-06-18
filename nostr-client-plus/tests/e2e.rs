@@ -2,7 +2,7 @@ use nostr_client_plus::client::Client;
 use nostr_client_plus::event::UnsignedEvent;
 use nostr_client_plus::request::{Filter, Request};
 use nostr_crypto::schnorr_signer::SchnorrSigner;
-use nostr_crypto::SenderSigner;
+use nostr_crypto::sender_signer::SenderSigner;
 use std::collections::HashMap;
 use std::time::Duration;
 
