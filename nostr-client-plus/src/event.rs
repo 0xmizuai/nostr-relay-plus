@@ -7,9 +7,9 @@ use serde_json::json;
 use std::fmt;
 use std::fmt::Formatter;
 
-pub struct PrepareEvent(Event);
+pub struct UnsignedEvent(Event);
 
-impl PrepareEvent {
+impl UnsignedEvent {
     pub fn new(
         sender: Sender,
         created_at: Timestamp,
@@ -31,7 +31,7 @@ impl PrepareEvent {
     }
 }
 
-impl PrepareEvent {
+impl UnsignedEvent {
     pub fn id(&self) -> Bytes32 {
         self.0.id()
     }

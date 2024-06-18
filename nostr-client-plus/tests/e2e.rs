@@ -1,5 +1,5 @@
 use nostr_client_plus::client::Client;
-use nostr_client_plus::event::PrepareEvent;
+use nostr_client_plus::event::UnsignedEvent;
 use nostr_client_plus::request::{Filter, Request};
 use nostr_crypto::schnorr_signer::SchnorrSigner;
 use nostr_crypto::SenderSigner;
@@ -33,7 +33,7 @@ async fn e2e() {
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     // Prepare event and send
-    let event = PrepareEvent::new(client.sender(), 0, 1, vec![], "Hello Rust".to_string());
+    let event = UnsignedEvent::new(client.sender(), 0, 1, vec![], "Hello Rust".to_string());
     let event_id = event.id();
     match client.publish(event).await {
         Ok(true) => println!("Published OK: event {}", hex::encode(event_id)),

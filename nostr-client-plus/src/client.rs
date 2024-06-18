@@ -1,5 +1,5 @@
 use crate::client_command::ClientCommand;
-use crate::event::PrepareEvent;
+use crate::event::UnsignedEvent;
 use crate::request::Request;
 use crate::wire::relay_message::RelayMessage;
 use anyhow::{anyhow, Result};
@@ -110,7 +110,7 @@ impl Client {
         // ToDo: handle error
     }
 
-    pub async fn publish(&self, event: PrepareEvent) -> Result<bool> {
+    pub async fn publish(&self, event: UnsignedEvent) -> Result<bool> {
         match &self.tx {
             Some(sender) => {
                 let event = event.sign(&self.signer);
