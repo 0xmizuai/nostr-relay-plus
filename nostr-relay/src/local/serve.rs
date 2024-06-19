@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use nostr_surreal_db::message::{events::Event, filter::Filter, notice::Notice};
+use nostr_surreal_db::message::wire::EventOnWire;
 
 use crate::{local::hooks::LocalStateHooks, message::IncomingMessage, util::wrap_ws_message};
 
@@ -19,25 +20,23 @@ impl LocalState {
     pub async fn handle_incoming_message(&mut self, incoming_message: IncomingMessage) -> Result<()> {
         match incoming_message {
             IncomingMessage::Event(event) => {
-                event.verify()?;
-                let e: Event = event.try_into()?;
-                e.validate()?; // ToDo: `verify` on EventOnWire or `validate` on Event?
+                let event_id_hex = hex::encode(event.id);
+                let reply = match self.handle_event(event).await {
+                    Ok(event) => {
+                        if self.auth_on_send_global_broadcast_event(&event) {
+                            if self.global_state.global_events_pub_sender.send(event).is_err() {
+                                // ToDo: if send is broken is logging enough?
+                                tracing::error!("Cannot send global event");
+                            }
+                        }
+                        Notice::saved(event_id_hex)
+                    }
+                    Err(err) => Notice::error(event_id_hex, err.to_string().as_str()),
+                };
 
-                if self.auth_on_db_write(&e) {
-                    tracing::debug!(
-                        "Writing Event ID {} to db on IP {:?}", 
-                        hex::encode(e.id), 
-                        self.client_ip_addr
-                    );
-                    self.global_state.db.write_event(&e).await?;
-                    tracing::debug!("Done Writing Event to db");
-                }
+                // We reply even if error, because EVENT needs OK message
+                self.outgoing_sender.send(reply).await?;
 
-                self.outgoing_sender.send(Notice::saved(hex::encode(e.id))).await?;
-
-                if self.auth_on_send_global_broadcast_event(&e) {
-                    self.global_state.global_events_pub_sender.send(e)?;
-                }
             },
             IncomingMessage::Req(sub) => {
                 let filters = sub.parse_filters()?;
@@ -71,6 +70,23 @@ impl LocalState {
             }
         }
         Ok(())
+    }
+
+    async fn handle_event(&mut self, event: EventOnWire) -> Result<Event> {
+        event.verify()?;
+        let e: Event = event.try_into()?;
+        e.validate()?; // ToDo: `verify` on EventOnWire or `validate` on Event?
+
+        if self.auth_on_db_write(&e) {
+            tracing::debug!(
+                        "Writing Event ID {} to db on IP {:?}",
+                        hex::encode(e.id),
+                        self.client_ip_addr
+                    );
+            self.global_state.db.write_event(&e).await?;
+            tracing::debug!("Done Writing Event to db");
+        }
+        Ok(e)
     }
 
     pub async fn handle_global_incoming_events(&self, event: Event) -> Result<String> {

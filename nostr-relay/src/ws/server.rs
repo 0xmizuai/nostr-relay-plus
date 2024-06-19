@@ -40,10 +40,14 @@ pub async fn handle_websocket_connection(
                 Some(Ok(Message::Text(ws_message))) => {
                     if let Ok(incoming) = serde_json::from_str(&ws_message) {
                         let result = local_state.handle_incoming_message(incoming).await;
+                        // ToDo: the following block does not distinguish between critical and
+                        //  non-critical errors. Closing the websocket connection is too drastic,
+                        //  replace with tracing, for the time being
                         if result.is_err() {
-                            let closing_notice = wrap_error_message("ws something", &result.err().unwrap());
-                            let _ = ws_sender.send(closing_notice).await;
-                            ws_sender.close().await.unwrap();
+                            // let closing_notice = wrap_error_message("ws something", &result.err().unwrap());
+                            // let _ = ws_sender.send(closing_notice).await;
+                            // ws_sender.close().await.unwrap();
+                            tracing::error!("{}", result.unwrap_err());
                         }
                     }
                     // ToDo: do something if serde fails
@@ -84,11 +88,13 @@ pub async fn handle_websocket_connection(
             }
             Ok(event) = local_state.global_state.global_events_pub_receiver.recv() => {
                 let result = local_state.handle_global_incoming_events(event).await;
-                if result.is_err() {
-                    let closing_notice = wrap_error_message("glob something", &result.err().unwrap());
-                    let _ = ws_sender.send(closing_notice).await;
-                    ws_sender.close().await.unwrap();
-                }
+                // ToDo: this handling is wrong because any error with broadcasting, including
+                //  unwanted events, results in the termination of the main websocket.
+                // if result.is_err() {
+                //     let closing_notice = wrap_error_message("glob something", &result.err().unwrap());
+                //     let _ = ws_sender.send(closing_notice).await;
+                //     ws_sender.close().await.unwrap();
+                // }
             },
             Some(outgoing) = outgoing_receiver.recv() => {
                 let msg = wrap_ws_message(outgoing);
