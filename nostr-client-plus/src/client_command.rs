@@ -1,11 +1,11 @@
 use crate::event::Event;
 use crate::request::Request;
-use nostr_surreal_db::types::Bytes32;
 use tokio::sync::oneshot::Sender;
+use crate::wire::relay_ok::RelayOk;
 
 #[derive(Debug)]
 pub enum ClientCommand {
     Req(Request),
-    Event((Event, Sender<bool>)),
-    Ack((Bytes32, bool)),
+    Event((Event, Sender<RelayOk>)),
+    Ack(RelayOk),
 }

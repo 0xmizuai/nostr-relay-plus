@@ -14,6 +14,7 @@ use tokio::sync::oneshot;
 use tokio::time::{timeout, Duration};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
+use crate::wire::relay_ok::RelayOk;
 
 pub struct Client {
     signer: SenderSigner,
@@ -62,7 +63,7 @@ impl Client {
         // Spawn sender, reading commands from internal channel
         tokio::spawn(async move {
             // Keep track of ack requests
-            let mut ack_table: HashMap<Bytes32, oneshot::Sender<bool>> = HashMap::new();
+            let mut ack_table: HashMap<Bytes32, oneshot::Sender<RelayOk>> = HashMap::new();
 
             while let Some(message) = receiver.recv().await {
                 println!("Command from channel {:?}", message);
@@ -81,9 +82,9 @@ impl Client {
                             break;
                         }
                     }
-                    ClientCommand::Ack((id, accept)) => {
-                        if let Some(tx) = ack_table.remove(&id) {
-                            let _ = tx.send(accept);
+                    ClientCommand::Ack(ok_msg) => {
+                        if let Some(tx) = ack_table.remove(&ok_msg.event_id) {
+                            let _ = tx.send(ok_msg);
                         }
                     }
                 }
@@ -101,7 +102,7 @@ impl Client {
                 RelayMessage::Ok(ok_msg) => {
                     println!("ACK: {}", serde_json::to_string(&ok_msg).unwrap());
                     let _ = tx
-                        .send(ClientCommand::Ack((ok_msg.event_id, ok_msg.accepted)))
+                        .send(ClientCommand::Ack(ok_msg))
                         .await;
                 }
                 _ => println!("Received: {:?}", msg),
@@ -110,21 +111,27 @@ impl Client {
         // ToDo: handle error
     }
 
-    pub async fn publish(&self, event: UnsignedEvent) -> Result<bool> {
+    pub async fn publish(&self, event: UnsignedEvent) -> Result<()> {
         match &self.tx {
             Some(sender) => {
                 let event = event.sign(&self.signer)?;
 
                 // Prepare ACK channel
-                let (tx, rx) = oneshot::channel::<bool>();
+                let (tx, rx) = oneshot::channel::<RelayOk>();
 
                 sender.send(ClientCommand::Event((event, tx))).await?;
 
                 // Wait for ACK with timeout
                 match timeout(Duration::from_secs(20), rx).await {
-                    Ok(Ok(accepted)) => Ok(accepted),
-                    Ok(Err(_)) => Err(anyhow!("request failed")),
-                    Err(_) => Err(anyhow!("timeout")),
+                    Ok(Ok(msg)) => {
+                        if msg.accepted {
+                            Ok(())
+                        } else {
+                            Err(anyhow!("rejected: {}", msg.message))
+                        }
+                    }
+                    Ok(Err(err)) => Err(anyhow!("request failed: {}", err)),
+                    Err(err) => Err(anyhow!("ACK timeout: {}", err)),
                 }
             }
             None => return Err(anyhow!("Publish: missing internal channel")),
