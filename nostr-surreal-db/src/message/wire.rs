@@ -9,7 +9,7 @@ use crate::types::{Bytes32, Timestamp};
 
 use super::sender::Sender;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EventOnWire {
     #[serde(with = "hex::serde")]
     pub id: Bytes32,
@@ -38,6 +38,14 @@ impl EventOnWire {
             self.content
         ]);
         sha256_hash_digests(json.to_string().as_bytes())
+    }
+
+    pub fn verify(&self) -> Result<()> {
+        let expected_hash = self.to_id_hash();
+        if expected_hash != self.id {
+            return Err(anyhow!("invalid event id"));
+        }
+        self.sender.validate_signature(expected_hash, &self.sig)
     }
 }
 

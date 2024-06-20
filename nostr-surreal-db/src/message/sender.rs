@@ -1,6 +1,10 @@
 use alloy_primitives::Address;
+use anyhow::Result;
 use num::traits::ToBytes;
 use serde::{Deserialize, Serialize};
+use nostr_crypto::eoa_signer::EoaSigner;
+use nostr_crypto::schnorr_signer::SchnorrSigner;
+use nostr_crypto::signer::Verifier;
 
 use crate::types::Bytes32;
 
@@ -54,15 +58,15 @@ impl Sender {
         }
     }
 
-    pub fn validate_signature(&self, _hash: Bytes32, _signature: &[u8]) -> bool {
+    pub fn validate_signature(&self, hash: Bytes32, signature: &[u8]) -> Result<()> {
         match self {
-            Sender::SchnorrPubKey(_) => true,
-            Sender::EoaAddress(_) => true,
+            Sender::SchnorrPubKey(key) => SchnorrSigner::verify(hash, signature, key),
+            Sender::EoaAddress(address) => EoaSigner::verify(hash, signature, address.as_slice()),
             Sender::ContractAddress((_, _)) => {
                 // ?
                 
 
-                true
+                unimplemented!()
             },
             Sender::Ens(_) => unimplemented!(),
         }

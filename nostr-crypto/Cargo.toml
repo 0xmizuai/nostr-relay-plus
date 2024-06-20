@@ -27,6 +27,8 @@ base64 = "0.13.0"
 p256 = "0.13"
 elliptic-curve = "0.13"
 tiny-keccak = { version = "2", features = ["keccak"] }
+k256 = { workspace = true }
+
 
 [dev-dependencies]
 hex = "0.4.3"

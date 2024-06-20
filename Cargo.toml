@@ -19,6 +19,7 @@ members = [
 
 [workspace.dependencies]
 alloy-primitives = { version = "0.6", features = ["serde"] }
+nostr-crypto = { path = "./nostr-crypto" }
 nostr-surreal-db = { path = "./nostr-surreal-db" }
 
 tokio = { version = "1", features = ["full"] }
@@ -37,3 +38,5 @@ rand_core = "0.6"
 
 hex = { version = "0.4.3", features = ["serde"] }
 num = "0.4"
+
+k256 = {  version = "0.13.3", features = ["serde"] }
