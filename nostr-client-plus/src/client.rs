@@ -29,9 +29,9 @@ impl Client {
 
     pub async fn connect(&mut self, url: &str) -> Result<()> {
         // If already connected, ignore. ToDo: handle this better
-        // if self.relay.is_some() {
-        //     return Ok(());
-        // }
+        if self.tx.is_some() {
+            return Err(anyhow!("Already connected"));
+        }
 
         let (sender, mut receiver): (Sender<ClientCommand>, Receiver<ClientCommand>) =
             mpsc::channel(32);
