@@ -24,8 +24,9 @@ rand = { workspace = true }
 axum = { version = "0.7", features = ["ws"]}
 axum-extra = { version = "0.9", features = ["typed-header"]}
 tower-http = { version = "0.5.0", features = ["fs", "trace", "cors"] }
-nostr-crypto = { path = "../nostr-crypto" }
-nostr-surreal-db = { path = "../nostr-surreal-db" }
+nostr-crypto = { workspace = true }
+nostr-plus-common = { workspace = true}
+nostr-surreal-db = { workspace = true }
 
 tracing = "0.1.37"
 tracing-appender = "0.2.2"

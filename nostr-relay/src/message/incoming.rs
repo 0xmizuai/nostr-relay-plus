@@ -7,10 +7,8 @@ use serde::{
 };
 use serde_json::Value;
 
-use nostr_surreal_db::{
-    message::wire::{EventOnWire, FilterOnWire},
-    message::subscription::Subscription,
-};
+use nostr_plus_common::wire::{EventOnWire, FilterOnWire};
+use nostr_surreal_db::message::subscription::Subscription;
 
 #[derive(Debug, Clone)]
 pub enum IncomingMessage {

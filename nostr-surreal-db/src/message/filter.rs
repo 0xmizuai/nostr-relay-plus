@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 
+use nostr_plus_common::{
+    sender::Sender,
+    types::Timestamp,
+    wire::{FilterOnWire, parse_filter_tags}
+};
 use serde::Serialize;
 
-use crate::types::{Tags, Timestamp};
-
-use super::{sender::Sender, wire::{parse_filter_tags, FilterOnWire}};
+use crate::types::Tags;
 
 #[derive(PartialEq, Eq, Debug, Clone, Default, Serialize)]
 pub struct Filter {
@@ -109,7 +112,8 @@ mod tests {
     use anyhow::Result;
 
     use super::*;
-    use crate::message::{events::Event, wire::EventOnWire};
+    use crate::message::events::Event;
+    use nostr_plus_common::wire::EventOnWire;
 
     #[test]
     fn deser_filter() -> Result<()> {

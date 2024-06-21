@@ -1,8 +1,8 @@
 use anyhow::Result;
 use nostr_crypto::signer::Signer;
-use nostr_surreal_db::message::sender::Sender;
-use nostr_surreal_db::message::wire::EventOnWire;
-use nostr_surreal_db::types::{Bytes32, Timestamp};
+use nostr_plus_common::sender::Sender;
+use nostr_plus_common::wire::EventOnWire;
+use nostr_plus_common::types::{Bytes32, Timestamp};
 use serde_json::json;
 use std::fmt;
 use std::fmt::Formatter;

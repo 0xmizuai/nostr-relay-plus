@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use nostr_surreal_db::message::{events::Event, filter::Filter, notice::Notice};
-use nostr_surreal_db::message::wire::EventOnWire;
+use nostr_plus_common::wire::EventOnWire;
 
 use crate::{local::hooks::LocalStateHooks, message::IncomingMessage, util::wrap_ws_message};
 

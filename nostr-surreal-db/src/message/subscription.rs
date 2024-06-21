@@ -1,7 +1,8 @@
 use anyhow::{anyhow, Result};
 use serde::Deserialize;
 
-use super::{events::Event, filter::Filter, wire::FilterOnWire};
+use super::{events::Event, filter::Filter};
+use nostr_plus_common::wire::FilterOnWire;
 
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Subscription {

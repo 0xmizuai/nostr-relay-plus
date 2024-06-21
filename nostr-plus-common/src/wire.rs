@@ -4,8 +4,9 @@ use anyhow::{anyhow, Result};
 use nostr_crypto::hash::sha256_hash_digests;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use crate::types::Bytes32;
 
-use crate::types::{Bytes32, Timestamp};
+use crate::types::Timestamp;
 
 use super::sender::Sender;
 

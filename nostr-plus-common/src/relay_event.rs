@@ -1,20 +1,20 @@
-use crate::wire::types::SubscriptionId;
-use nostr_surreal_db::message::wire::EventOnWire;
+use crate::types::SubscriptionId;
+use crate::wire::EventOnWire;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct RelayEvent {
-    pub(crate) subscription_id: SubscriptionId,
-    pub(crate) event: EventOnWire,
+    pub subscription_id: SubscriptionId,
+    pub event: EventOnWire,
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::wire::relay_event::RelayEvent;
+    use crate::relay_event::RelayEvent;
+    use crate::sender::Sender;
+    use crate::wire::EventOnWire;
+    use crate::types::Bytes32;
     use nostr_crypto::schnorr_signer::SchnorrSigner;
-    use nostr_surreal_db::message::sender::Sender;
-    use nostr_surreal_db::message::wire::EventOnWire;
-    use nostr_surreal_db::types::Bytes32;
 
     #[test]
     fn test_serialize_deserialize() {

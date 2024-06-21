@@ -1,4 +1,4 @@
-use nostr_surreal_db::message::wire::FilterOnWire;
+use nostr_plus_common::wire::FilterOnWire;
 use serde::ser::SerializeSeq;
 use serde::{Serialize, Serializer};
 use std::fmt;

@@ -1,8 +1,9 @@
 use serde_json::json;
+use nostr_plus_common::types::Bytes32;
 
 use crate::message::events::Event;
 use crate::message::filter::Filter;
-use crate::types::{Bytes32, Tags, NOSTR_EVENTS_TABLE, NOSTR_TAGS_TABLE};
+use crate::types::{Tags, NOSTR_EVENTS_TABLE, NOSTR_TAGS_TABLE};
 
 use super::SqlBuilder;
 
@@ -205,7 +206,7 @@ impl SqlBuilder {
 
 #[cfg(test)]
 mod tests {
-    use crate::message::wire::FilterOnWire;
+    use nostr_plus_common::wire::FilterOnWire;
 
     use super::*;
     #[test]

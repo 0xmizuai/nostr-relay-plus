@@ -45,7 +45,7 @@ impl DB {
 
 #[cfg(test)]
 mod tests {
-    use crate::message::wire::{EventOnWire, FilterOnWire};
+    use nostr_plus_common::wire::{EventOnWire, FilterOnWire};
 
     use super::*;
 

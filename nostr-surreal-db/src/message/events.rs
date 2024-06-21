@@ -1,12 +1,13 @@
 use anyhow::{anyhow, Result};
+use nostr_plus_common::types::{Bytes32, Timestamp};
+use nostr_plus_common::sender::Sender;
+use nostr_plus_common::wire::EventOnWire;
 use serde::{Deserialize, Serialize};
 
 use crate::get_current_timstamp;
-use crate::types::{Bytes32, Tags, Timestamp};
+use crate::types::Tags;
 
 use super::filter::Filter;
-use super::sender::Sender;
-use super::wire::EventOnWire;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {

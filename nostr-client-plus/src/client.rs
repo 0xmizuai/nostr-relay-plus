@@ -1,20 +1,20 @@
 use crate::client_command::ClientCommand;
 use crate::event::UnsignedEvent;
 use crate::request::Request;
-use crate::wire::relay_message::RelayMessage;
+use nostr_plus_common::relay_message::RelayMessage;
 use anyhow::{anyhow, Result};
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{FutureExt, SinkExt, StreamExt};
 use nostr_crypto::signer::Signer;
 use nostr_crypto::sender_signer::SenderSigner;
-use nostr_surreal_db::message::sender::Sender as NostrSender;
-use nostr_surreal_db::types::Bytes32;
+use nostr_plus_common::sender::Sender as NostrSender;
+use nostr_plus_common::types::Bytes32;
 use std::collections::HashMap;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::oneshot;
 use tokio::time::{timeout, Duration};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
-use crate::wire::relay_ok::RelayOk;
+use nostr_plus_common::relay_ok::RelayOk;
 
 pub struct Client {
     signer: SenderSigner,

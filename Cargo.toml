@@ -15,11 +15,13 @@ members = [
     'nostr-surreal-db',
     'nostr-relay',
     "nostr-client-plus",
+    "nostr-plus-common",
 ]
 
 [workspace.dependencies]
 alloy-primitives = { version = "0.6", features = ["serde"] }
 nostr-crypto = { path = "./nostr-crypto" }
+nostr-plus-common = { path = "./nostr-plus-common" }
 nostr-surreal-db = { path = "./nostr-surreal-db" }
 
 tokio = { version = "1", features = ["full"] }

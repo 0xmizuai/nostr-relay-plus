@@ -1,5 +1,5 @@
-use crate::wire::relay_event::RelayEvent;
-use crate::wire::relay_ok::RelayOk;
+use crate::relay_event::RelayEvent;
+use crate::relay_ok::RelayOk;
 use serde::{
     de::{self, SeqAccess, Visitor},
     ser::{Error, SerializeSeq},
@@ -85,7 +85,7 @@ impl<'de> Deserialize<'de> for RelayMessage {
 
 #[cfg(test)]
 mod tests {
-    use crate::wire::relay_message::RelayMessage;
+    use crate::relay_message::RelayMessage;
 
     #[test]
     fn test_deserialize_serialize_event() {
