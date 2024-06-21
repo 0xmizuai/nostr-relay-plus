@@ -1,11 +1,12 @@
 use crate::client_command::ClientCommand;
 use crate::event::UnsignedEvent;
 use crate::request::Request;
-use nostr_plus_common::relay_message::RelayMessage;
 use anyhow::{anyhow, Result};
-use futures_util::{FutureExt, SinkExt, StreamExt};
-use nostr_crypto::signer::Signer;
+use futures_util::{SinkExt, StreamExt};
 use nostr_crypto::sender_signer::SenderSigner;
+use nostr_crypto::signer::Signer;
+use nostr_plus_common::relay_message::RelayMessage;
+use nostr_plus_common::relay_ok::RelayOk;
 use nostr_plus_common::sender::Sender as NostrSender;
 use nostr_plus_common::types::Bytes32;
 use std::collections::HashMap;
@@ -14,7 +15,6 @@ use tokio::sync::oneshot;
 use tokio::time::{timeout, Duration};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
-use nostr_plus_common::relay_ok::RelayOk;
 
 pub struct Client {
     signer: SenderSigner,
@@ -28,6 +28,15 @@ impl Client {
     }
 
     pub async fn connect(&mut self, url: &str) -> Result<()> {
+        self._connect(url, None).await
+    }
+
+    pub async fn connect_with_channel(&mut self, url: &str) -> Result<Receiver<RelayMessage>> {
+        let (sender, receiver) = mpsc::channel(10);
+        self._connect(url, Some(sender)).await.map(|_| receiver)
+    }
+
+    pub async fn _connect(&mut self, url: &str, sink: Option<Sender<RelayMessage>>) -> Result<()> {
         // If already connected, ignore. ToDo: handle this better
         if self.tx.is_some() {
             return Err(anyhow!("Already connected"));
@@ -50,10 +59,10 @@ impl Client {
             while let Some(msg) = read.next().await {
                 match msg {
                     Ok(Message::Text(message)) => {
-                        Self::handle_incoming_message(message, &sender_clone).await
+                        Self::handle_incoming_message(message, &sender_clone, sink.as_ref()).await
                     }
                     Ok(Message::Ping(_)) => {} // tungstenite handles Pong already
-                    Ok(Message::Close(_)) => println!("Server closed connection"), // ToDo: do something
+                    Ok(Message::Close(c)) => println!("Server closed connection: {:?}", c), // ToDo: do something
                     Ok(_) => println!("Unsupported message"),
                     Err(err) => println!("Do something about {}", err), // ToDo: handle error
                 }
@@ -96,19 +105,28 @@ impl Client {
         Ok(())
     }
 
-    async fn handle_incoming_message(msg: String, tx: &Sender<ClientCommand>) {
-        if let Ok(incoming) = serde_json::from_str::<RelayMessage>(&msg) {
-            match incoming {
+    async fn handle_incoming_message(
+        msg: String,
+        tx: &Sender<ClientCommand>,
+        sink: Option<&Sender<RelayMessage>>,
+    ) {
+        match serde_json::from_str::<RelayMessage>(&msg) {
+            Ok(incoming) => match incoming {
                 RelayMessage::Ok(ok_msg) => {
                     println!("ACK: {}", serde_json::to_string(&ok_msg).unwrap());
-                    let _ = tx
-                        .send(ClientCommand::Ack(ok_msg))
-                        .await;
+                    let _ = tx.send(ClientCommand::Ack(ok_msg)).await;
                 }
-                _ => println!("Received: {:?}", msg),
-            }
+                relay_msg => {
+                    match sink {
+                        None => println!("Unhandled: {:?}", msg),
+                        Some(sender) => {
+                            sender.send(relay_msg).await.unwrap(); // ToDO: do not panic here
+                        }
+                    }
+                }
+            },
+            Err(err) => eprintln!("ERROR ({}) with msg: {}", err, msg),
         }
-        // ToDo: handle error
     }
 
     pub async fn publish(&self, event: UnsignedEvent) -> Result<()> {
@@ -143,16 +161,14 @@ impl Client {
             SenderSigner::Schnorr(signer) => {
                 NostrSender::SchnorrPubKey(signer.private.verifying_key().to_bytes().into())
             }
-            SenderSigner::Eoa(signer) => {
-                NostrSender::EoaAddress(signer.address())
-            }
+            SenderSigner::Eoa(signer) => NostrSender::EoaAddress(signer.address()),
         }
     }
 
     pub fn try_sign(&self, msg: &[u8; 32]) -> Result<Vec<u8>> {
         match &self.signer {
             SenderSigner::Schnorr(signer) => signer.try_sign(msg),
-            SenderSigner::Eoa(signer) => signer.try_sign(msg)
+            SenderSigner::Eoa(signer) => signer.try_sign(msg),
         }
     }
 
