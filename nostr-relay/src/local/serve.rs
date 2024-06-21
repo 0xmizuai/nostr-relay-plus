@@ -89,13 +89,12 @@ impl LocalState {
         Ok(e)
     }
 
-    pub async fn handle_global_incoming_events(&self, event: Event) -> Result<String> {
+    pub async fn handle_global_incoming_events(&self, event: Event) -> Result<()> {
         let id = self.is_interested(&event)?;
-        let notice = Notice::message(serde_json::to_string(&event)?);
+        let notice = Notice::event(id, event);
         self.outgoing_sender.send(notice).await?;
 
-        println!("{:?}", event);
-        Ok(id)
+        Ok(())
     }
 
 }

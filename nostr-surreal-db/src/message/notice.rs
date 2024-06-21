@@ -1,4 +1,6 @@
 use serde_json::{json, Value};
+use nostr_plus_common::types::SubscriptionId;
+use crate::message::events::Event;
 
 #[derive(Debug, Clone)]
 pub enum EventResultStatus {
@@ -24,6 +26,7 @@ pub enum Notice {
     EventResult(EventResult),
     AuthChallenge(String),
     Eose(String),
+    Event((SubscriptionId, Event)),
 }
 
 impl EventResultStatus {
@@ -99,6 +102,10 @@ impl Notice {
         })
     }
 
+    pub fn event(sub_id: SubscriptionId, event: Event) -> Notice {
+        Notice::Event((sub_id, event))
+    }
+
     pub fn eose(id: String) -> Notice {
         Notice::Eose(id)
     }
@@ -109,6 +116,7 @@ impl Notice {
             Notice::EventResult(ref res) => json!(["OK", res.id, res.status.to_bool(), res.msg]),
             Notice::AuthChallenge(ref challenge) => json!(["AUTH", challenge]),
             Notice::Eose(ref id) => json!(["EOSE", id]),
+            Notice::Event((sub_id, event)) => json!(["EVENT", sub_id, event]),
         }
     }
 
