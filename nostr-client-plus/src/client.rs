@@ -75,7 +75,6 @@ impl Client {
             let mut ack_table: HashMap<Bytes32, oneshot::Sender<RelayOk>> = HashMap::new();
 
             while let Some(message) = receiver.recv().await {
-                println!("Command from channel {:?}", message);
                 match message {
                     ClientCommand::Req(req) => {
                         if write.send(Message::from(req.to_string())).await.is_err() {
@@ -120,7 +119,9 @@ impl Client {
                     match sink {
                         None => println!("Unhandled: {:?}", msg),
                         Some(sender) => {
-                            sender.send(relay_msg).await.unwrap(); // ToDO: do not panic here
+                            if let Err(e) = sender.send(relay_msg).await {
+                                eprintln!("{}", e);
+                            }
                         }
                     }
                 }

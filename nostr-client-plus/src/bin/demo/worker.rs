@@ -49,7 +49,9 @@ async fn main() {
     };
     let subscription_id = "ae4788ade947b42bb8b0d89c9fb3c129c10be87043c32190a96daa9e822a9b00";
     let req = Request::new(subscription_id.to_string(), vec![filter]);
+    println!("WORKER subscription req -> {:?}", req);
     client.lock().await.subscribe(req).await.unwrap();
+    println!("WORKER subscribed");
 
 
     listener_handle.await.unwrap();

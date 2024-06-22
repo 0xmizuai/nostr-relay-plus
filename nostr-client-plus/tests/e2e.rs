@@ -24,8 +24,10 @@ async fn e2e() {
     // Start a handler feeding from the receiver, otherwise it will fill-up
     tokio::spawn(async move {
         while let Some(msg) = eoa_rcv.recv().await {
-            let msg = serde_json::to_string(&msg).unwrap();
-            println!("Handled: {}", msg);
+            match serde_json::to_string(&msg) {
+                Ok(msg) => println!("Handled: {}", msg),
+                Err(err) => println!("{err}"),
+            }
         }
     });
     tokio::time::sleep(Duration::from_secs(1)).await;

@@ -18,11 +18,14 @@ impl LocalState {
 
 
     pub async fn handle_incoming_message(&mut self, incoming_message: IncomingMessage) -> Result<()> {
+        println!("Handling incoming message");
         match incoming_message {
             IncomingMessage::Event(event) => {
                 let event_id_hex = hex::encode(event.id);
+                println!("Sending reply back for {}", event_id_hex);
                 let reply = match self.handle_event(event).await {
                     Ok(event) => {
+                        println!("Sending broadcast for {}", event_id_hex);
                         if self.auth_on_send_global_broadcast_event(&event) {
                             if self.global_state.global_events_pub_sender.send(event).is_err() {
                                 // ToDo: if send is broken is logging enough?
@@ -73,7 +76,9 @@ impl LocalState {
     }
 
     async fn handle_event(&mut self, event: EventOnWire) -> Result<Event> {
+        println!("Processing Event {}", hex::encode(event.id));
         event.verify()?;
+        eprintln!("verify success");
         let e: Event = event.try_into()?;
         e.validate()?; // ToDo: `verify` on EventOnWire or `validate` on Event?
 
