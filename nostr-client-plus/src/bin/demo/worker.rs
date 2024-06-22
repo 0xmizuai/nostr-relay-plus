@@ -7,6 +7,7 @@ use nostr_client_plus::request::{Filter, Request};
 use nostr_crypto::eoa_signer::EoaSigner;
 use nostr_crypto::sender_signer::SenderSigner;
 use nostr_plus_common::relay_message::RelayMessage;
+use nostr_plus_common::types::Timestamp;
 
 #[tokio::main]
 async fn main() {
@@ -28,7 +29,7 @@ async fn main() {
                     // Prepare JobBookingAttempt (kind == 6_001)
                     let event = UnsignedEvent::new(
                         client_clone.lock().await.sender(),
-                        0,
+                        Timestamp::default(),
                         6_001,
                         vec![vec!["#e".to_string(), hex::encode(ev.event.id)]],
                         "trying to get this job".to_string(),

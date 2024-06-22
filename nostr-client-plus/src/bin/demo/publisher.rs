@@ -8,6 +8,7 @@ use nostr_client_plus::request::{Filter, Request};
 use nostr_crypto::eoa_signer::EoaSigner;
 use nostr_crypto::sender_signer::SenderSigner;
 use nostr_plus_common::relay_message::RelayMessage;
+use nostr_plus_common::types::Timestamp;
 
 #[tokio::main]
 async fn main() {
@@ -21,7 +22,13 @@ async fn main() {
     let mut client_clone = client.clone();
 
     // Create JobPost (kind == 6_000)
-    let event = UnsignedEvent::new(client.lock().await.sender(), 0, 6_000, vec![], "job_1".to_string());
+    let event = UnsignedEvent::new(
+        client.lock().await.sender(),
+        Timestamp::default(),
+        6_000,
+        vec![],
+        "job_1".to_string()
+    );
     let event_id = event.id();
     if client.lock().await.publish(event).await.is_err() {
         eprintln!("Cannot publish job");
@@ -40,7 +47,7 @@ async fn main() {
                         // Create JobAssigned (kind == 6_002)
                         let event = UnsignedEvent::new(
                             client_clone.lock().await.sender(),
-                            0,
+                            Timestamp::default(),
                             6_002,
                             vec![
                                 vec!["#e".to_string(), hex::encode(event_id)],
