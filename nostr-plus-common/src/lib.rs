@@ -4,3 +4,4 @@ pub mod relay_ok;
 pub mod sender;
 pub mod types;
 pub mod wire;
+mod relay_auth;
