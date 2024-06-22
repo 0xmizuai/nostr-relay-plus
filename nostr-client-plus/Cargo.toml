@@ -3,6 +3,16 @@ name = "nostr-client-plus"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "publisher"
+path = "src/bin/demo/publisher.rs"
+test = false
+
+[[bin]]
+name = "worker"
+path = "src/bin/demo/worker.rs"
+test = false
+
 [dependencies]
 alloy-primitives = { workspace = true }
 anyhow = { workspace = true }
