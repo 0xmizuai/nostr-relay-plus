@@ -52,6 +52,7 @@ impl LocalState {
                         .collect::<Vec<_>>()
                 } else { Vec::new() };
 
+                tracing::warn!("#### I have {} messages stored for this REQ", messages.len());
                 for msg in messages {
                     self.outgoing_sender.send(msg).await?;
                 }

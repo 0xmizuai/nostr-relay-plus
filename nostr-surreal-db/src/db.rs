@@ -30,6 +30,8 @@ impl DB {
             .get_events_by_filters(&filters)
             .build();
 
+        tracing::warn!("Query = {:?}", sql);
+
         let events = self.db
             .query(sql).await?
             .take::<Vec<Event>>(0)?
