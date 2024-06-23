@@ -47,7 +47,7 @@ impl LocalState {
                     self.global_state.db.query_by_filters(&filters).await?
                         .iter()
                         .map(|e| {  
-                            Notice::message(serde_json::to_string(e).unwrap())
+                            Notice::event(sub.id.clone(), e.clone())
                         })
                         .collect::<Vec<_>>()
                 } else { Vec::new() };
