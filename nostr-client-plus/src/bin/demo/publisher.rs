@@ -8,7 +8,6 @@ use nostr_client_plus::request::{Filter, Request};
 use nostr_crypto::eoa_signer::EoaSigner;
 use nostr_crypto::sender_signer::SenderSigner;
 use nostr_plus_common::relay_message::RelayMessage;
-use nostr_plus_common::types::Timestamp;
 
 #[tokio::main]
 async fn main() {
@@ -18,18 +17,18 @@ async fn main() {
     let mut relay_channel = client.connect_with_channel("ws://127.0.0.1:3033").await.unwrap();
 
     let mut job_assigned = false;
-    let mut client = Arc::new(Mutex::new(client));
-    let mut client_clone = client.clone();
+    let client = Arc::new(Mutex::new(client));
+    let client_clone = client.clone();
 
     // Create JobPost (kind == 6_000)
     let event = UnsignedEvent::new(
         client.lock().await.sender(),
-        Timestamp::default(),
+        12345,
         6_000,
         vec![],
         "job_1".to_string()
     );
-    let event_id = event.id();
+    let event_id = event.id(); // id of original job post, keep it for following events
     if client.lock().await.publish(event).await.is_err() {
         eprintln!("Cannot publish job");
         return;
@@ -37,21 +36,25 @@ async fn main() {
 
     // Start relay listener
     let listener_handle = tokio::spawn(async move {
+        println!("Publisher ready to listen");
         while let Some(msg) = relay_channel.recv().await {
             match msg {
                 RelayMessage::Event(ev) => {
-                    // Some clever logic to assign the job
+                    // Here: some clever logic to assign the job
+                    // This is just fist come first served
                     if job_assigned {
                         println!("Too late, job is gone");
                     } else {
+                        let event_publisher_id = hex::encode(ev.event.sender.to_bytes());
+                        println!("Going to assign job to {}", event_publisher_id);
                         // Create JobAssigned (kind == 6_002)
                         let event = UnsignedEvent::new(
                             client_clone.lock().await.sender(),
-                            Timestamp::default(),
+                            12345,
                             6_002,
                             vec![
                                 vec!["#e".to_string(), hex::encode(event_id)],
-                                vec!["#p".to_string(), hex::encode(ev.event.sender.to_bytes())],
+                                vec!["#p".to_string(), event_publisher_id],
                             ],
                             "job 1 assigned".to_string(),
                         );
