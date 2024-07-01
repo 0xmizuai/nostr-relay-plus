@@ -6,6 +6,7 @@ use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
 };
 use std::fmt::Formatter;
+use crate::relay_auth::RelayAuth;
 
 pub enum RelayMessage {
     Event(RelayEvent),
@@ -13,6 +14,7 @@ pub enum RelayMessage {
     EOSE,
     Closed,
     Notice,
+    Auth(RelayAuth),
 }
 
 impl Serialize for RelayMessage {
@@ -36,7 +38,9 @@ impl Serialize for RelayMessage {
                 seq.serialize_element(&ok_msg.message)?;
                 seq.end()
             }
-            _ => Err(Error::custom("Unsupported enum")),
+            RelayMessage::Auth(_) | RelayMessage::EOSE | RelayMessage::Closed | RelayMessage::Notice => {
+                Err(Error::custom("Unsupported enum for serialization"))
+            }
         }
     }
 }
@@ -68,6 +72,11 @@ impl<'de> Visitor<'de> for RelayMessageVisitor {
                 let remaining: RelayOk =
                     Deserialize::deserialize(de::value::SeqAccessDeserializer::new(seq))?;
                 Ok(RelayMessage::Ok(remaining))
+            }
+            "AUTH" => {
+                let remaining: RelayAuth =
+                    Deserialize::deserialize(de::value::SeqAccessDeserializer::new(seq))?;
+                Ok(RelayMessage::Auth(remaining))
             }
             _ => Err(de::Error::unknown_variant(identifier, &["EVENT", "OK"])),
         }

@@ -18,11 +18,14 @@ impl LocalState {
 
 
     pub async fn handle_incoming_message(&mut self, incoming_message: IncomingMessage) -> Result<()> {
+        println!("Handling incoming message");
         match incoming_message {
             IncomingMessage::Event(event) => {
                 let event_id_hex = hex::encode(event.id);
+                println!("Sending reply back for {}", event_id_hex);
                 let reply = match self.handle_event(event).await {
                     Ok(event) => {
+                        println!("Sending broadcast for {}", event_id_hex);
                         if self.auth_on_send_global_broadcast_event(&event) {
                             if self.global_state.global_events_pub_sender.send(event).is_err() {
                                 // ToDo: if send is broken is logging enough?
@@ -44,11 +47,12 @@ impl LocalState {
                     self.global_state.db.query_by_filters(&filters).await?
                         .iter()
                         .map(|e| {  
-                            Notice::message(serde_json::to_string(e).unwrap())
+                            Notice::event(sub.id.clone(), e.clone())
                         })
                         .collect::<Vec<_>>()
                 } else { Vec::new() };
 
+                tracing::warn!("#### I have {} messages stored for this REQ", messages.len());
                 for msg in messages {
                     self.outgoing_sender.send(msg).await?;
                 }
@@ -73,7 +77,9 @@ impl LocalState {
     }
 
     async fn handle_event(&mut self, event: EventOnWire) -> Result<Event> {
+        println!("Processing Event {}", hex::encode(event.id));
         event.verify()?;
+        eprintln!("verify success");
         let e: Event = event.try_into()?;
         e.validate()?; // ToDo: `verify` on EventOnWire or `validate` on Event?
 

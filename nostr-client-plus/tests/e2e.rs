@@ -5,6 +5,7 @@ use nostr_crypto::eoa_signer::EoaSigner;
 use nostr_crypto::schnorr_signer::SchnorrSigner;
 use nostr_crypto::sender_signer::SenderSigner;
 use std::time::Duration;
+use nostr_plus_common::types::Timestamp;
 
 #[tokio::test]
 async fn e2e() {
@@ -23,8 +24,10 @@ async fn e2e() {
     // Start a handler feeding from the receiver, otherwise it will fill-up
     tokio::spawn(async move {
         while let Some(msg) = eoa_rcv.recv().await {
-            let msg = serde_json::to_string(&msg).unwrap();
-            println!("Handled: {}", msg);
+            match serde_json::to_string(&msg) {
+                Ok(msg) => println!("Handled: {}", msg),
+                Err(err) => println!("{err}"),
+            }
         }
     });
     tokio::time::sleep(Duration::from_secs(1)).await;
@@ -44,7 +47,7 @@ async fn e2e() {
     // Prepare event for Schnorr client and send
     let event = UnsignedEvent::new(
         client.sender(),
-        0,
+        Timestamp::default(),
         1,
         vec![vec![
             "e".to_string(),
@@ -63,7 +66,13 @@ async fn e2e() {
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     // Prepare event for Eoa client and send
-    let event = UnsignedEvent::new(client_2.sender(), 0, 1, vec![], "Hello Rust".to_string());
+    let event = UnsignedEvent::new(
+        client_2.sender(),
+        Timestamp::default(),
+        1,
+        vec![],
+        "Hello Rust".to_string()
+    );
     let event_id = event.id();
     match client_2.publish(event).await {
         Ok(_) => println!("Published OK: event {}", hex::encode(event_id)),
