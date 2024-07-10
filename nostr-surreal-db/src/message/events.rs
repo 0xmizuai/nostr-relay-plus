@@ -63,9 +63,6 @@ impl TryFrom<EventOnWire> for Event {
 
                 if tag[0] == "e" || tag[0] == "p" {
                     let h = hex::decode(&tag[1])?;
-                    if h.len() != 32 {
-                        return Err(anyhow!("invalid e or p tag value"));
-                    }
                 }
 
                 if tag[0].len() > 1 {
