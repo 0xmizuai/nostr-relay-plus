@@ -29,4 +29,15 @@ impl GlobalState {
             global_events_pub_receiver: receiver,
         })
     }
+
+    pub async fn new_with_remote_db() -> Result<Self> {
+        let (sender, receiver) = broadcast::channel(100);
+        let db = DB::prod_connect().await?;
+        Ok(Self {
+            db,
+            global_events_pub_sender: sender,
+            global_events_pub_receiver: receiver,
+        })
+    }
+
 }

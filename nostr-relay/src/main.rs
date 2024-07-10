@@ -10,6 +10,13 @@ use nostr_relay::{ws_wrapper, GlobalState};
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Basic command line parsing
+    let args: Vec<String> = std::env::args().collect();
+    let mut is_local = true;
+    if args.len() > 1 && args[1] == "--remote" {
+        is_local = false;
+    }
+
     let mut builder = env_logger::Builder::from_default_env();
     builder.format_timestamp(None);
     builder.filter_level(log::LevelFilter::Debug);
@@ -19,7 +26,11 @@ async fn main() -> Result<()> {
     // .allow_methods([Method::GET, Method::POST])
     // .allow_origin(Any);
 
-    let global_state = GlobalState::new_with_local_db().await?;
+    let global_state = if is_local {
+        GlobalState::new_with_local_db().await?
+    } else {
+        GlobalState::new_with_remote_db().await?
+    };
     let app = Router::new()
         .route("/health", get(|| async { "OK" }))
         .route("/", get(ws_wrapper))
