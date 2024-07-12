@@ -18,7 +18,7 @@ async fn main() {
     if args.len() > 1 {
         salt = (&args[1]).parse().expect("Cannot convert to u8");
     } else {
-        println!("No arguments provided: 1 assumend");
+        println!("No worker id provided: id = 1 assumed");
     }
 
     // Get 2 random subscription id
