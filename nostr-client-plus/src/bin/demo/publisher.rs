@@ -53,10 +53,10 @@ async fn main() {
                             12345,
                             6_002,
                             vec![
-                                vec!["#e".to_string(), hex::encode(event_id)],
-                                vec!["#p".to_string(), event_publisher_id],
+                                vec!["e".to_string(), hex::encode(event_id)],
+                                vec!["p".to_string(), event_publisher_id],
                             ],
-                            "job 1 assigned".to_string(),
+                            "Job 1 assigned".to_string(),
                         );
                         match client_clone.lock().await.publish(event).await {
                             Ok(_) => {
@@ -77,7 +77,7 @@ async fn main() {
     let filter = Filter {
         kinds: vec![6_001],
         tags: HashMap::from([
-            ("e".to_string(), json!(hex::encode(event_id))),
+            ("#e".to_string(), json!([hex::encode(event_id)])),
         ]),
         ..Default::default()
     };
