@@ -94,9 +94,6 @@ pub fn parse_filter_tags(raw_tags: HashMap<String, Value>) -> Result<
             for s in val {
                 if key == "e" || key == "p" {
                     let h = hex::decode(&s)?;
-                    if h.len() != 32 {
-                        return Err(anyhow!("invalid e or p tag value"));
-                    }
                 }
 
                 list.push(s);
