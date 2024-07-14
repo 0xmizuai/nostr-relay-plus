@@ -34,6 +34,9 @@ async fn main() {
         return;
     }
 
+    // Subscription_id used for accepting JobBooking events
+    let subscription_id = "ae4788ade947b42bb8b0d89c9fb3c129c10be87043c32190a96daa9e822a9bf6";
+
     // Start relay listener
     let listener_handle = tokio::spawn(async move {
         println!("Publisher ready to listen");
@@ -41,9 +44,11 @@ async fn main() {
             match msg {
                 RelayMessage::Event(ev) => {
                     // Here: some clever logic to assign the job
-                    // This is just fist come first served
+                    // This is just first come first served
                     if job_assigned {
-                        println!("Too late, job is gone");
+                        println!("Too late, job is gone: unsubscribing");
+                        // Cancel subscription
+                        client_clone.lock().await.close_subscription(subscription_id.to_string()).await.unwrap();
                     } else {
                         let event_publisher_id = hex::encode(ev.event.sender.to_bytes());
                         println!("Going to assign job to {}", event_publisher_id);
@@ -81,7 +86,6 @@ async fn main() {
         ]),
         ..Default::default()
     };
-    let subscription_id = "ae4788ade947b42bb8b0d89c9fb3c129c10be87043c32190a96daa9e822a9bf6";
     let req = Request::new(subscription_id.to_string(), vec![filter]);
     client.lock().await.subscribe(req).await.unwrap();
 

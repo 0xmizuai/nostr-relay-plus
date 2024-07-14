@@ -65,10 +65,11 @@ impl LocalState {
                 // 1. validate the challenge
                 // let event: Event = auth.try_into()?;
                 // let content = hex::decode(event.content)?;
-
-
             }
-
+            IncomingMessage::Close(sub_id) => {
+                tracing::info!("Cancelling subscription {}", sub_id);
+                self.unsubscribe(sub_id.as_str());
+            },
             _ => { 
                 println!("{:?}", incoming_message); 
             }
