@@ -13,6 +13,8 @@ use nostr_crypto::eoa_signer::EoaSigner;
 use nostr_crypto::sender_signer::SenderSigner;
 use nostr_plus_common::relay_message::RelayMessage;
 
+mod common;
+
 type PublisherEv = (String, Vec<String>);
 
 #[tokio::main]
@@ -42,7 +44,7 @@ async fn main() {
         tracing::info!("Publisher task started");
 
         while let Some((content, winners)) = pub_rx.recv().await {
-            let timestamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).expect("Invalid time").as_secs();
+            let timestamp = common::get_mins_before_now_timestamp(0);
 
             // Create JobPost (kind == 6_000)
             let event = UnsignedEvent::new(
@@ -101,7 +103,7 @@ async fn main() {
                         // Create JobAssigned (kind == 6_002)
                         let event = UnsignedEvent::new(
                             client_clone.lock().await.sender(),
-                            12345,
+                            common::get_mins_before_now_timestamp(0),
                             6_002,
                             vec![
                                 vec!["e".to_string(), hex::encode(job_id)],
