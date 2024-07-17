@@ -24,6 +24,17 @@ const WORKERS_PER_JOB: usize = 3;
 
 #[tokio::main]
 async fn main() {
+    // Command line parsing
+    let args: Vec<String> = std::env::args().collect();
+    let relay_url = match args.len() {
+        1 => String::from("ws://127.0.0.1:3033"),
+        2 => args[1].clone(),
+        _ => {
+            eprintln!("Too many arguments");
+            return;
+        }
+    };
+
     // Logger setup
     let subscriber = FmtSubscriber::builder()
         .with_max_level(tracing::Level::INFO)
@@ -34,7 +45,7 @@ async fn main() {
     let signer = EoaSigner::from_bytes(&[7; 32]); // ToDo: better private key
     let mut client = Client::new(SenderSigner::Eoa(signer));
     let mut relay_channel = client
-        .connect_with_channel("ws://127.0.0.1:3033")
+        .connect_with_channel(relay_url.as_str())
         .await
         .unwrap();
     let client = Arc::new(Mutex::new(client));
