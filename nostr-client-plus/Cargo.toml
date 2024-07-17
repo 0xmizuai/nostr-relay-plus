@@ -4,14 +4,24 @@ version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "publisher"
+name = "demo-publisher"
 path = "src/bin/demo/publisher.rs"
 test = false
 
 [[bin]]
-name = "worker"
+name = "demo-worker"
 path = "src/bin/demo/worker.rs"
 test = false
+
+[[bin]]
+name = "assigner"
+path = "src/bin/assigner.rs"
+test = true
+
+[[bin]]
+name = "worker"
+path = "src/bin/worker.rs"
+test = true
 
 [dependencies]
 alloy-primitives = { workspace = true }
@@ -22,6 +32,7 @@ tokio-tungstenite = "0.23.0"
 futures-util = "0.3.30"
 hex = { workspace = true }
 k256 = { workspace = true }
+linked-hash-map = "0.5.6"
 nostr-crypto = { workspace = true }
 nostr-plus-common = { workspace = true }
 nostr-surreal-db = { workspace = true }
