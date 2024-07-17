@@ -68,6 +68,7 @@ impl Client {
                     Err(err) => println!("Do something about {}", err), // ToDo: handle error
                 }
             }
+            eprintln!("Error in listener while reading form channel: closing");
         });
 
         // Spawn sender, reading commands from internal channel
