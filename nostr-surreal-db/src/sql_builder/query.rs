@@ -122,6 +122,7 @@ impl SqlBuilder {
     }
 
     fn build_one_filter(filter: Filter) -> Vec<String> {
+        // ToDo: filter by tags
         let mut filter_query = Vec::new();
 
         let mut id_filter = Vec::new();
@@ -178,7 +179,7 @@ impl SqlBuilder {
 
     pub fn get_events_by_filters(&mut self, filters: &[Filter]) -> &mut Self {
         // TODO: we are skipping tags for now ... as it is very complicated
-        // Instead, we check on the results from the other queries
+        //  Instead, we check on the results from the other queries
         assert!(filters.len() > 0);
 
         let mut sql = format!("SELECT *, meta::id(id) as id FROM {NOSTR_EVENTS_TABLE} WHERE ");

@@ -8,13 +8,14 @@ use nostr_crypto::signer::Signer;
 use nostr_plus_common::relay_message::RelayMessage;
 use nostr_plus_common::relay_ok::RelayOk;
 use nostr_plus_common::sender::Sender as NostrSender;
-use nostr_plus_common::types::Bytes32;
+use nostr_plus_common::types::{Bytes32, SubscriptionId};
 use std::collections::HashMap;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::oneshot;
 use tokio::time::{timeout, Duration};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
+use crate::close::Close;
 
 pub struct Client {
     signer: SenderSigner,
@@ -67,6 +68,7 @@ impl Client {
                     Err(err) => println!("Do something about {}", err), // ToDo: handle error
                 }
             }
+            eprintln!("Error in listener while reading form channel: closing");
         });
 
         // Spawn sender, reading commands from internal channel
@@ -93,6 +95,12 @@ impl Client {
                     ClientCommand::Ack(ok_msg) => {
                         if let Some(tx) = ack_table.remove(&ok_msg.event_id) {
                             let _ = tx.send(ok_msg);
+                        }
+                    }
+                    ClientCommand::Close(close_msg) => {
+                        if write.send(Message::from(close_msg.to_string())).await.is_err() {
+                            eprintln!("Close subscription: websocket error"); // ToDo: do something better
+                            break;
                         }
                     }
                 }
@@ -179,6 +187,17 @@ impl Client {
                 sender.send(ClientCommand::Req(req)).await?;
             }
             None => return Err(anyhow!("Subscribe: missing websocket")),
+        }
+        Ok(())
+    }
+
+    pub async fn close_subscription(&self, sub_id: SubscriptionId) -> Result<()> {
+        let close_msg = Close::new(sub_id);
+        match &self.tx {
+            Some(sender) => {
+                sender.send(ClientCommand::Close(close_msg)).await?;
+            }
+            None => return Err(anyhow!("Close subscription: missing websocket")),
         }
         Ok(())
     }

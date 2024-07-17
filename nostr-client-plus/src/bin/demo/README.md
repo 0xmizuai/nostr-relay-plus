@@ -27,7 +27,7 @@
 ### Publisher
 
 ```shell
-cargo run --package nostr-client-plus --bin publishe
+cargo run --package nostr-client-plus --bin publisher
 ```
 
 ### Worker
@@ -47,7 +47,7 @@ cargo run --package nostr-relay &
 ### Issues
 
 The code is very basic, but it should be able to show how workers compete
-and who the publisher assigns the tak to.
+and who the publisher assigns the task to.
 
 However, the event returned for the subscription, do not contain any tags (although the
 events contain them). For this reason has not been possible to run multiple workers

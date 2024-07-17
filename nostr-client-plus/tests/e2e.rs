@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use nostr_client_plus::client::Client;
 use nostr_client_plus::event::UnsignedEvent;
 use nostr_client_plus::request::{Filter, Request};
@@ -5,6 +6,7 @@ use nostr_crypto::eoa_signer::EoaSigner;
 use nostr_crypto::schnorr_signer::SchnorrSigner;
 use nostr_crypto::sender_signer::SenderSigner;
 use std::time::Duration;
+use serde_json::json;
 use nostr_plus_common::types::Timestamp;
 
 #[tokio::test]
@@ -35,6 +37,9 @@ async fn e2e() {
     // Prepare subscription request and send
     let filter = Filter {
         kinds: vec![1],
+        tags: HashMap::from([
+            ("#e".to_string(), json!([hex::encode([1, 2, 3])])),
+        ]),
         ..Default::default()
     };
     let req = Request::new(
