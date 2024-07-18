@@ -9,6 +9,9 @@ use nostr_client_plus::utils::get_timestamp;
 use nostr_crypto::eoa_signer::EoaSigner;
 use nostr_crypto::sender_signer::SenderSigner;
 
+mod utils;
+use utils::get_private_key_from_name;
+
 #[tokio::main]
 async fn main() {
     // Command line parsing
@@ -30,8 +33,11 @@ async fn main() {
         .database("test-preprocessor");
     let collection: Collection<RawDataEntry> = db.collection("raw_data");
 
+    // Get a silly private key based on a string identifying the service.
+    let private_key = get_private_key_from_name("Publisher").unwrap();
+
     // Create client
-    let signer = EoaSigner::from_bytes(&[127; 32]);
+    let signer = EoaSigner::from_bytes(&private_key);
     let mut client = Client::new(SenderSigner::Eoa(signer));
     client.connect(relay_url.as_str()).await.unwrap();
 

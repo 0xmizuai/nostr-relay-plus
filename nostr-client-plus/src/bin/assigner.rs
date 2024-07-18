@@ -14,6 +14,9 @@ use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tracing_subscriber::FmtSubscriber;
 
+mod utils;
+use utils::get_private_key_from_name;
+
 type WorkersBook = LinkedHashMap<Sender, ()>;
 type PubStruct = (Vec<Sender>, RelayEvent); // Struct for passing jobs to assign
 
@@ -41,8 +44,11 @@ async fn main() {
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
+    // Get a silly private key based on a string identifying the service.
+    let private_key = get_private_key_from_name("Assigner").unwrap();
+
     // Create nostr-relay client
-    let signer = EoaSigner::from_bytes(&[7; 32]); // ToDo: better private key
+    let signer = EoaSigner::from_bytes(&private_key);
     let mut client = Client::new(SenderSigner::Eoa(signer));
     let mut relay_channel = client
         .connect_with_channel(relay_url.as_str())
