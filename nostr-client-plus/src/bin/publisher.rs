@@ -55,6 +55,7 @@ async fn main() {
         let payload = NewJobPayload {
             header,
             kv_key: entry.r2_key,
+            config: None,
         };
         let event = UnsignedEvent::new(
             client.sender(),

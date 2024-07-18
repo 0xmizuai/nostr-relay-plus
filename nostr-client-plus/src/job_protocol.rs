@@ -3,6 +3,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::crypto::CryptoHash;
 
+
+// ToDo: this just a placeholder struct
+#[derive(Serialize, Deserialize)]
+pub struct AIRuntimeConfig {}
+
 #[repr(u16)]
 pub enum Kind {
     NewJob = 6000,
@@ -35,5 +40,5 @@ pub struct PayloadHeader {
 pub struct NewJobPayload {
     pub header: PayloadHeader,
     pub kv_key: String,
-    //    config: Option<Config>, // ?!
+    pub config: Option<AIRuntimeConfig>,
 }

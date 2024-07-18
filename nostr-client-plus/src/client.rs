@@ -48,7 +48,7 @@ impl Client {
 
         let (socket, resp) = match connect_async(url).await {
             Ok((socket, response)) => (socket, response),
-            Err(_) => return Err(anyhow!("Cannot connect to {}", url)),
+            Err(err) => return Err(anyhow!("Cannot connect to {}: {}", url, err)),
         };
         println!("Connection established: {:?}", resp);
 
