@@ -1,0 +1,65 @@
+use mongodb::bson::doc;
+use mongodb::{Client as DbClient, Collection};
+use nostr_client_plus::client::Client;
+use nostr_client_plus::crypto::CryptoHash;
+use nostr_client_plus::db::{select_many, RawDataEntry};
+use nostr_client_plus::event::UnsignedEvent;
+use nostr_client_plus::job_protocol::{Kind, NewJobPayload, PayloadHeader};
+use nostr_client_plus::utils::get_timestamp;
+use nostr_crypto::eoa_signer::EoaSigner;
+use nostr_crypto::sender_signer::SenderSigner;
+
+#[tokio::main]
+async fn main() {
+    // Command line parsing
+    let args: Vec<String> = std::env::args().collect();
+    let relay_url = match args.len() {
+        1 => String::from("ws://127.0.0.1:3033"),
+        2 => args[1].clone(),
+        _ => {
+            eprintln!("Too many arguments");
+            return;
+        }
+    };
+
+    // Configure DB from env
+    let db_url = std::env::var("MONGO_URL").expect("MONGO_URL is not set");
+    let db = DbClient::with_uri_str(db_url)
+        .await
+        .expect("Cannot connect to db")
+        .database("test-preprocessor");
+    let collection: Collection<RawDataEntry> = db.collection("raw_data");
+
+    // Create client
+    let signer = EoaSigner::from_bytes(&[127; 32]);
+    let mut client = Client::new(SenderSigner::Eoa(signer));
+    client.connect(relay_url.as_str()).await.unwrap();
+
+    let timestamp_now = get_timestamp();
+
+    let entries = select_many(&collection, doc! {}, Some(100), None)
+        .await
+        .unwrap();
+    for entry in entries {
+        let header = PayloadHeader {
+            job_type: 0,
+            job_hash: CryptoHash::default(),
+            time: timestamp_now,
+        };
+        let payload = NewJobPayload {
+            header,
+            kv_key: entry.r2_key,
+        };
+        let event = UnsignedEvent::new(
+            client.sender(),
+            timestamp_now,
+            Kind::NEW_JOB,
+            vec![], // ToDo: there should be a `t` tag
+            serde_json::to_string(&payload).expect("Payload serialization failed"),
+        );
+        if client.publish(event).await.is_err() {
+            eprintln!("Cannot publish job");
+        }
+    }
+    println!("Done");
+}

@@ -19,6 +19,11 @@ path = "src/bin/assigner.rs"
 test = true
 
 [[bin]]
+name = "publisher"
+path = "src/bin/publisher.rs"
+test = true
+
+[[bin]]
 name = "worker"
 path = "src/bin/worker.rs"
 test = true
@@ -29,10 +34,12 @@ anyhow = { workspace = true }
 url = "2.5.0"
 tokio = {  workspace = true }
 tokio-tungstenite = "0.23.0"
+futures = { workspace = true }
 futures-util = "0.3.30"
 hex = { workspace = true }
 k256 = { workspace = true }
 linked-hash-map = "0.5.6"
+mongodb = "2.8.2"
 nostr-crypto = { workspace = true }
 nostr-plus-common = { workspace = true }
 nostr-surreal-db = { workspace = true }
