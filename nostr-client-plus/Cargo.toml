@@ -24,6 +24,11 @@ path = "src/bin/publisher.rs"
 test = true
 
 [[bin]]
+name = "aggregator"
+path = "src/bin/aggregator.rs"
+test = true
+
+[[bin]]
 name = "worker"
 path = "src/bin/worker.rs"
 test = true

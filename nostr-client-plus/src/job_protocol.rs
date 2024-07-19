@@ -1,6 +1,6 @@
 use nostr_plus_common::types::Timestamp;
 use serde::{Deserialize, Serialize};
-
+use nostr_plus_common::sender::Sender;
 use crate::crypto::CryptoHash;
 
 
@@ -29,7 +29,7 @@ impl Kind {
     pub const RESOLUTION: u16 = Kind::Resolution as u16;
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Serialize, Deserialize)]
 pub struct PayloadHeader {
     pub job_type: u16,        // ToDo: job types need to be codified
     pub job_hash: CryptoHash, // ToDo: we cannot use the job hash because the payload is part of the calculation. So which one?
@@ -41,4 +41,16 @@ pub struct NewJobPayload {
     pub header: PayloadHeader,
     pub kv_key: String,
     pub config: Option<AIRuntimeConfig>,
+}
+
+#[derive(PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResultPayload {
+    pub header: PayloadHeader,
+    pub output: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct AggregatePayload {
+    pub header: PayloadHeader,
+    pub winners: Vec<Sender>,
 }
