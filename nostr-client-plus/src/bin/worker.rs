@@ -1,6 +1,8 @@
 /*
   This is a dummy implementation of a worker. Not necessarily fully functional
 */
+use anyhow::{anyhow, Result};
+use nostr_client_plus::job_protocol::{NewJobPayload, PayloadHeader, ResultPayload};
 use nostr_client_plus::{
     client::Client,
     event::UnsignedEvent,
@@ -10,13 +12,18 @@ use nostr_client_plus::{
 };
 use nostr_crypto::eoa_signer::EoaSigner;
 use nostr_crypto::sender_signer::SenderSigner;
+use nostr_plus_common::relay_event::RelayEvent;
 use nostr_plus_common::relay_message::RelayMessage;
+use nostr_plus_common::sender::Sender;
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::select;
 use tokio::sync::Mutex;
-use tokio::time::{interval, Duration};
+use tokio::time::{interval, sleep, Duration};
+
+mod utils;
+use crate::utils::get_single_tag_entry;
 
 #[tokio::main]
 async fn main() {
@@ -51,9 +58,21 @@ async fn main() {
             select! {
                 Some(msg) = relay_channel.recv() => {
                     match msg {
-                        RelayMessage::Event(ev) => {
-                            println!("Working on: {}", ev.event.content);
-                        }
+                        RelayMessage::Event(ev) => match ev.event.kind {
+                            Kind::ASSIGN => {
+                                println!("Working on: {}", ev.event.content);
+                                let sender = client_clone.lock().await.sender();
+                                match process_assign(ev, sender) {
+                                    Ok(ev) => {
+                                        if client_clone.lock().await.publish(ev).await.is_err() {
+                                            eprintln!("Cannot publish");
+                                        }
+                                    }
+                                    Err(err) => eprintln!("{err}"),
+                                }
+                            }
+                            _ => eprintln!("Expecting just Assign events"),
+                        },
                         _ => eprintln!("Ignoring non-event message"),
                     }
                 }
@@ -71,7 +90,7 @@ async fn main() {
             }
         }
     });
-    println!("Client {} listening", client_id);
+    println!("Worker {} listening", client_id);
 
     // subscription id used for Jobs Assign
     let sub_id_assign = "be4788ade0000000000000000000000000000000000000000000000000000000";
@@ -88,4 +107,44 @@ async fn main() {
     tracing::info!("Subscribed to NewJob and Alive");
 
     event_handler.await.unwrap();
+}
+
+fn process_assign(ev: RelayEvent, sender: Sender) -> Result<UnsignedEvent> {
+    let job_id = get_single_tag_entry('e', &ev.event.tags)?.ok_or(anyhow!("Missing e tag"))?;
+    let payload = get_new_job_payload(&ev)?;
+    // Let's pretend we did something with the payload, and
+    // now we submit the result
+    get_result_event(payload, sender, job_id)
+}
+
+fn get_new_job_payload(ev: &RelayEvent) -> Result<NewJobPayload> {
+    let res: NewJobPayload = serde_json::from_str(ev.event.content.as_str())?;
+    Ok(res)
+}
+
+fn get_result_event(
+    payload: NewJobPayload,
+    sender: Sender,
+    job_id: String,
+) -> Result<UnsignedEvent> {
+    let fake_result = format!("Some result for {}", payload.header.raw_data_id.to_string());
+    let result = ResultPayload {
+        header: payload.header,
+        output: fake_result,
+    };
+    let content = match serde_json::to_string(&result) {
+        Ok(val) => val,
+        Err(err) => {
+            tracing::error!("Cannot serialize payload");
+            return Err(anyhow!(err));
+        }
+    };
+    let ev = UnsignedEvent::new(
+        sender,
+        get_timestamp(),
+        Kind::RESULT,
+        vec![vec!["e".to_string(), job_id]],
+        content,
+    );
+    Ok(ev)
 }
