@@ -1,7 +1,7 @@
 // Port from dolma-downloader
 use serde::{Deserialize, Serialize};
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(transparent)]
 pub struct CryptoHash {
     #[serde(with = "hex::serde")]
