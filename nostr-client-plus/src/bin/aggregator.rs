@@ -14,6 +14,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 use tracing_subscriber::FmtSubscriber;
+use nostr_client_plus::request::{Filter, Request};
 
 mod utils;
 use crate::utils::{get_private_key_from_name, get_single_tag_entry};
@@ -138,6 +139,17 @@ async fn main() {
             }
         }
     });
+
+    // Send subscription, so everything will finally start
+    let sub_id = "be4788ade0000000000000000000000000000000000000000000000000001111";
+    let filter = Filter {
+        kinds: vec![Kind::RESULT],
+        since: Some(get_timestamp()),
+        ..Default::default()
+    };
+    let req = Request::new(sub_id.to_string(), vec![filter]);
+    client.subscribe(req).await.expect("Cannot subscribe for Results");
+    tracing::info!("Subscribed to Result");
 
     listener_handler.await.unwrap();
     aggregator_handler.await.unwrap();
