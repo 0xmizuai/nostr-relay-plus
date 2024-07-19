@@ -1,8 +1,6 @@
+use crate::crypto::CryptoHash;
 use nostr_plus_common::types::Timestamp;
 use serde::{Deserialize, Serialize};
-use nostr_plus_common::sender::Sender;
-use crate::crypto::CryptoHash;
-
 
 // ToDo: this just a placeholder struct
 #[derive(Serialize, Deserialize)]
@@ -31,8 +29,8 @@ impl Kind {
 
 #[derive(PartialEq, Eq, Serialize, Deserialize)]
 pub struct PayloadHeader {
-    pub job_type: u16,        // ToDo: job types need to be codified
-    pub job_hash: CryptoHash, // ToDo: we cannot use the job hash because the payload is part of the calculation. So which one?
+    pub job_type: u16,           // ToDo: job types need to be codified
+    pub raw_data_id: CryptoHash, // we need in order to cross-reference finished_jobs db entries with raw_data
     pub time: Timestamp,
 }
 
@@ -47,10 +45,4 @@ pub struct NewJobPayload {
 pub struct ResultPayload {
     pub header: PayloadHeader,
     pub output: String,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct AggregatePayload {
-    pub header: PayloadHeader,
-    pub winners: Vec<Sender>,
 }

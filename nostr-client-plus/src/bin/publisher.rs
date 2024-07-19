@@ -43,13 +43,13 @@ async fn main() {
 
     let timestamp_now = get_timestamp();
 
-    let entries = select_many(&collection, doc! {}, Some(100), None)
+    let entries = select_many::<RawDataEntry>(&collection, doc! {}, Some(1), None)
         .await
         .unwrap();
     for entry in entries {
         let header = PayloadHeader {
             job_type: 0,
-            job_hash: CryptoHash::default(),
+            raw_data_id: entry._id,
             time: timestamp_now,
         };
         let payload = NewJobPayload {

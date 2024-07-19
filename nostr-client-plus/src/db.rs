@@ -1,9 +1,12 @@
+use crate::crypto::CryptoHash;
+use crate::job_protocol::ResultPayload;
 use anyhow::Result;
 use futures::StreamExt;
 use mongodb::{bson::Document, options::FindOptions, Collection};
+use nostr_plus_common::sender::Sender;
+use nostr_plus_common::types::Timestamp;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-
-use crate::crypto::CryptoHash;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RawDataEntry {
@@ -16,12 +19,24 @@ pub struct RawDataEntry {
     pub r2_key: String,               // Key to retrieve the content from R2
 }
 
-pub async fn select_many(
-    col: &Collection<RawDataEntry>,
+#[derive(Serialize, Deserialize)]
+pub struct FinishedJobs {
+    pub _id: CryptoHash,
+
+    pub workers: Vec<Sender>,
+    pub timestamp: Timestamp,
+    pub result: ResultPayload,
+}
+
+pub async fn select_many<T>(
+    col: &Collection<T>,
     filter: Document,
     limit: Option<i64>,
     skip: Option<u64>,
-) -> Result<Vec<RawDataEntry>> {
+) -> Result<Vec<T>>
+where
+    T: DeserializeOwned,
+{
     let options = FindOptions::builder().limit(limit).skip(skip).build();
 
     let mut docs = col.find(filter, Some(options)).await?;

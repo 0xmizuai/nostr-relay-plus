@@ -1,9 +1,10 @@
 use anyhow::Result;
 use mongodb::{Client as DbClient, Collection};
 use nostr_client_plus::client::Client;
-use nostr_client_plus::db::RawDataEntry;
+use nostr_client_plus::db::{FinishedJobs, RawDataEntry};
 use nostr_client_plus::event::UnsignedEvent;
-use nostr_client_plus::job_protocol::{AggregatePayload, Kind, ResultPayload};
+use nostr_client_plus::job_protocol::{Kind, ResultPayload};
+use nostr_client_plus::request::{Filter, Request};
 use nostr_client_plus::utils::get_timestamp;
 use nostr_crypto::eoa_signer::EoaSigner;
 use nostr_crypto::sender_signer::SenderSigner;
@@ -14,12 +15,13 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 use tracing_subscriber::FmtSubscriber;
-use nostr_client_plus::request::{Filter, Request};
 
 mod utils;
 use crate::utils::{get_private_key_from_name, get_single_tag_entry};
 
 type AggrMessage = (String, (Sender, ResultPayload));
+
+const N_WINNERS: usize = 3;
 
 #[tokio::main]
 async fn main() {
@@ -46,7 +48,7 @@ async fn main() {
         .await
         .expect("Cannot connect to db")
         .database("test-preprocessor");
-    let collection: Collection<RawDataEntry> = db.collection("tmp_results");
+    let collection: Collection<FinishedJobs> = db.collection("finished_jobs");
 
     // Get a silly private key based on a string identifying the service.
     let private_key = get_private_key_from_name("Aggregator").unwrap();
@@ -107,30 +109,43 @@ async fn main() {
             match aggr_book.entry(job_id.clone()) {
                 Entry::Occupied(mut entry) => {
                     let (workers, payload) = entry.get_mut();
+
                     if *payload != new_payload {
                         // ToDo: here the logic can be complicated. For example, how do we
                         //  handle resolutions now? Do we need a separate book to handle
                         //  controversies?
                         tracing::error!("payloads for {} are different", job_id);
+
+                        // ToDo: Currently we handle disputes by deleting the entry altogether.
+                        //  If this was already at the second result, another one will come and
+                        //  linger in the book because no other matches are expected to come.
+                        //  Another approach needs to decided.
+                        entry.remove();
                         continue;
                     }
 
                     // Ok, they are the same
-                    if workers.len() == 2 {
-                        // the current one will be the 3rd one, so we can remove the entry and
-                        // send it for publishing.
-                        // ToDo: it's better to publish from here and then remove, in case publish
-                        //  fails. But how do we handle publishing failures? How do they get
-                        //  rewarded?
-                        workers.push(sender);
-                        let ev =
-                            get_aggregation_event(workers, new_payload, &job_id, client.sender());
-                        if client.publish(ev).await.is_err() {
-                            tracing::error!("Cannot publish Aggr");
+                    workers.push(sender);
+                    // We allow the case of len > N_WORKERS for cases where there are issues
+                    // writing to the db or removing from book.
+                    // The first N_WINNERS are still the same in the DB, regardless.
+                    if workers.len() >= N_WINNERS {
+                        let raw_data_id = new_payload.header.raw_data_id.clone();
+                        let db_entry = FinishedJobs {
+                            _id: raw_data_id,
+                            workers: workers.clone(), // if we remove first, no need to clone but this is safer
+                            timestamp: get_timestamp(),
+                            result: new_payload,
+                        };
+                        match collection.insert_one(db_entry, None).await {
+                            Ok(_) => {
+                                entry.remove(); // Remove only if we know it's safe in db
+                            }
+                            Err(err) => {
+                                // We log and that's it, we keep the entry in book for later inspection
+                                tracing::error!("Cannot write finished job to db: {}", err);
+                            }
                         }
-                        entry.remove(); // ToDo: should we remove if publish failed?
-                    } else {
-                        workers.push(sender);
                     }
                 }
                 Entry::Vacant(entry) => {
@@ -148,7 +163,10 @@ async fn main() {
         ..Default::default()
     };
     let req = Request::new(sub_id.to_string(), vec![filter]);
-    client.subscribe(req).await.expect("Cannot subscribe for Results");
+    client
+        .subscribe(req)
+        .await
+        .expect("Cannot subscribe for Results");
     tracing::info!("Subscribed to Result");
 
     listener_handler.await.unwrap();
@@ -159,23 +177,4 @@ async fn main() {
 fn get_result_payload(ev: &RelayEvent) -> Result<ResultPayload> {
     let res: ResultPayload = serde_json::from_str(ev.event.content.as_str())?;
     Ok(res)
-}
-
-fn get_aggregation_event(
-    workers: &Vec<Sender>,
-    payload: ResultPayload,
-    job_id: &String,
-    this_sender: Sender,
-) -> UnsignedEvent {
-    let content = AggregatePayload {
-        header: payload.header,
-        winners: workers.clone(),
-    };
-    UnsignedEvent::new(
-        this_sender,
-        get_timestamp(),
-        Kind::AGG,
-        vec![vec!["e".to_string(), hex::encode(job_id)]],
-        serde_json::to_string(&content).expect("content serialization failed"),
-    )
 }
