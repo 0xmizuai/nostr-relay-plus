@@ -94,8 +94,9 @@ async fn main() {
                 Some((workers, ev)) = pub_rx.recv() => {
                     tracing::debug!(r#"Sending "{}""#, ev.event.content);
                     let mut tags: Vec<Vec<String>> = Vec::with_capacity(workers.len());
+                    tags.push(vec!["e".to_string(), hex::encode(ev.event.id)]);
                     for w in workers {
-                        tags.push(vec!["p".to_string(), hex::encode(w.to_bytes())])
+                        tags.push(vec!["p".to_string(), hex::encode(w.to_bytes())]);
                     }
                     let timestamp = get_timestamp();
                     let event = UnsignedEvent::new(
