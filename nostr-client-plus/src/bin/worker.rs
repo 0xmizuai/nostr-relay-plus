@@ -2,7 +2,7 @@
   This is a dummy implementation of a worker. Not necessarily fully functional
 */
 use anyhow::{anyhow, Result};
-use nostr_client_plus::job_protocol::{NewJobPayload, PayloadHeader, ResultPayload};
+use nostr_client_plus::job_protocol::{NewJobPayload, ResultPayload};
 use nostr_client_plus::{
     client::Client,
     event::UnsignedEvent,
@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::select;
 use tokio::sync::Mutex;
-use tokio::time::{interval, sleep, Duration};
+use tokio::time::{interval, Duration};
 
 mod utils;
 use crate::utils::get_single_tag_entry;

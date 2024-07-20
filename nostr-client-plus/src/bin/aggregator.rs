@@ -1,8 +1,7 @@
 use anyhow::Result;
 use mongodb::{Client as DbClient, Collection};
 use nostr_client_plus::client::Client;
-use nostr_client_plus::db::{FinishedJobs, RawDataEntry};
-use nostr_client_plus::event::UnsignedEvent;
+use nostr_client_plus::db::FinishedJobs;
 use nostr_client_plus::job_protocol::{Kind, ResultPayload};
 use nostr_client_plus::request::{Filter, Request};
 use nostr_client_plus::utils::get_timestamp;
