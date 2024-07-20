@@ -1,8 +1,7 @@
-use mongodb::bson::doc;
+use mongodb::bson::from_document;
 use mongodb::{Client as DbClient, Collection};
 use nostr_client_plus::client::Client;
-use nostr_client_plus::crypto::CryptoHash;
-use nostr_client_plus::db::{select_many, RawDataEntry};
+use nostr_client_plus::db::{left_anti_join, RawDataEntry};
 use nostr_client_plus::event::UnsignedEvent;
 use nostr_client_plus::job_protocol::{Kind, NewJobPayload, PayloadHeader};
 use nostr_client_plus::utils::get_timestamp;
@@ -43,10 +42,12 @@ async fn main() {
 
     let timestamp_now = get_timestamp();
 
-    let entries = select_many::<RawDataEntry>(&collection, doc! {}, Some(1), None)
+    let entries = left_anti_join(&collection, "finished_jobs", 3)
         .await
         .unwrap();
     for entry in entries {
+        let entry: RawDataEntry = from_document(entry).unwrap();
+        println!("Entry {}", entry._id.to_string());
         let header = PayloadHeader {
             job_type: 0,
             raw_data_id: entry._id,
