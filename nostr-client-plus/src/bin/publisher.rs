@@ -13,19 +13,22 @@ use utils::get_private_key_from_name;
 
 #[tokio::main]
 async fn main() {
+    // Define needed env variables
+    let db_url = std::env::var("MONGO_URL").expect("MONGO_URL is not set");
+    let relay_url = std::env::var("RELAY_URL").unwrap_or("ws://127.0.0.1:3033".to_string());
+
     // Command line parsing
     let args: Vec<String> = std::env::args().collect();
-    let relay_url = match args.len() {
-        1 => String::from("ws://127.0.0.1:3033"),
-        2 => args[1].clone(),
+    let limit_publish: i64 = match args.len() {
+        1 => 1000_i64,
+        2 => args[1].parse().expect("Invalid number"),
         _ => {
             eprintln!("Too many arguments");
             return;
         }
     };
 
-    // Configure DB from env
-    let db_url = std::env::var("MONGO_URL").expect("MONGO_URL is not set");
+    // Configure DB from args
     let db = DbClient::with_uri_str(db_url)
         .await
         .expect("Cannot connect to db")
@@ -42,7 +45,7 @@ async fn main() {
 
     let timestamp_now = get_timestamp();
 
-    let entries = left_anti_join(&collection, "finished_jobs", 3)
+    let entries = left_anti_join(&collection, "finished_jobs", limit_publish)
         .await
         .unwrap();
     for entry in entries {
