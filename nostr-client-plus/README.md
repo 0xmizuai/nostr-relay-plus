@@ -10,9 +10,6 @@ when starting services.
 `Assigner` and `Aggregator` need to start first. Their order is not important but they need to be
 started before the other services.
 
-Currently, `Assigner` will go into CPU spinning if events to publish arrive but there are not enough `Workers` around.  
-For this reason it's recommended to have `Workers` already sending heartbeat before `Publisher` is run for the first time.
-
 ### Assigner
 
 ```shell

@@ -9,6 +9,7 @@ use nostr_crypto::sender_signer::SenderSigner;
 use nostr_plus_common::relay_event::RelayEvent;
 use nostr_plus_common::relay_message::RelayMessage;
 use nostr_plus_common::sender::Sender;
+use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
@@ -18,11 +19,12 @@ mod utils;
 use utils::get_private_key_from_name;
 
 type WorkersBook = LinkedHashMap<Sender, ()>;
+type JobQueue = VecDeque<RelayEvent>;
+
 type PubStruct = (Vec<Sender>, RelayEvent); // Struct for passing jobs to assign
 
 // ToDo: we do not need so many, every few seconds new ones will show up.
-//  For now, just report, but then make it a hard limit and start evicting.
-const MAX_WORKERS: usize = 1_000_000;
+const MAX_WORKERS: usize = 10_000;
 const WORKERS_PER_JOB: usize = 3;
 
 #[tokio::main]
@@ -40,7 +42,7 @@ async fn main() {
 
     // Logger setup
     let subscriber = FmtSubscriber::builder()
-        .with_max_level(tracing::Level::INFO)
+        .with_max_level(tracing::Level::DEBUG)
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
@@ -64,32 +66,19 @@ async fn main() {
     let event_handler = tokio::spawn(async move {
         tracing::info!("Assigner event handler started");
 
-        // Rescheduling channel: contains event that could not be processed immediately
-        let (resch_tx, mut resch_rx) = mpsc::channel(100);
-
         // Publishing channel
         let (pub_tx, mut pub_rx) = mpsc::channel(100);
 
         // Data structure to keep track of most recent workers
         // ToDo: We don't use the value, so a HashSet maintaining insertion order, should suffice
         let mut avail_workers = WorkersBook::new();
+        // Queue of jobs that cannot be assigned immediately
+        let mut job_queue = VecDeque::new();
 
         loop {
             tokio::select! {
                 Some(msg) = relay_channel.recv() => {
-                    if let Some(ev) = handle_event(msg, &mut avail_workers, &pub_tx).await {
-                        if resch_tx.send(ev).await.is_err() {
-                            tracing::error!("error while rescheduling message");
-                        }
-                    }
-                }
-                Some(msg) = resch_rx.recv() => {
-                    tracing::debug!("Got rescheduled event");
-                    if let Some(ev) = handle_event(RelayMessage::Event(msg), &mut avail_workers, &pub_tx).await {
-                        if resch_tx.send(ev).await.is_err() {
-                            tracing::error!("error while rescheduling message");
-                        }
-                    }
+                    handle_event(msg, &mut avail_workers, &mut job_queue, &pub_tx).await;
                 }
                 Some((workers, ev)) = pub_rx.recv() => {
                     tracing::debug!(r#"Sending "{}""#, ev.event.content);
@@ -136,40 +125,62 @@ async fn main() {
 async fn handle_event(
     msg: RelayMessage,
     book: &mut WorkersBook,
+    queue: &mut JobQueue,
     pub_tx: &mpsc::Sender<PubStruct>,
-) -> Option<RelayEvent> {
+) {
     match msg {
         RelayMessage::Event(ev) => {
             match ev.event.kind {
                 Kind::ALIVE => {
                     let worker_id = ev.event.sender.clone();
                     book.insert(worker_id, ());
-                    tracing::debug!("available workers = {}", book.len());
-                    // ToDo: if above threshold, trim
+                    tracing::debug!("HB, now {}", book.len());
+                    // Check if there is a queue to empty
+                    while !queue.is_empty() && book.len() >= WORKERS_PER_JOB {
+                        tracing::debug!("Emptying queue with {} el", queue.len());
+                        let ev = queue.pop_front().unwrap();
+                        let workers = get_workers(book);
+                        pub_tx
+                            .send((workers, ev))
+                            .await
+                            .expect("pub channel broken");
+                    }
+                    // Keep the number of workers below a certain threshold
                     if book.len() > MAX_WORKERS {
-                        tracing::warn!("Too many registered workers: {}", book.len());
+                        // Remove LRU
+                        tracing::debug!("Trimming workers book ({} el)", book.len());
+                        book.pop_front().unwrap();
                     }
                 }
                 Kind::NEW_JOB => {
+                    tracing::debug!("Got a job to assign");
                     if book.len() < WORKERS_PER_JOB {
-                        // not enough workers, reschedule
-                        return Some(ev);
+                        tracing::debug!("Not enough workers: {}", book.len());
+                        // not enough workers, queue
+                        queue.push_back(ev);
+                    } else {
+                        let workers = get_workers(book);
+                        pub_tx
+                            .send((workers, ev))
+                            .await
+                            .expect("pub channel broken");
                     }
-                    // Assign same job to N workers
-                    let mut workers = Vec::with_capacity(WORKERS_PER_JOB);
-                    for _ in 0..WORKERS_PER_JOB {
-                        let (w, _) = book.pop_back().expect("There should be at enough workers");
-                        workers.push(w);
-                    }
-                    pub_tx.send((workers, ev)).await.expect("");
                 }
                 _ => {}
             }
-            None
         }
         _ => {
             tracing::warn!("non-event message");
-            None
         }
     }
+}
+
+#[inline]
+fn get_workers(book: &mut WorkersBook) -> Vec<Sender> {
+    let mut workers = Vec::with_capacity(WORKERS_PER_JOB);
+    for _ in 0..WORKERS_PER_JOB {
+        let (w, _) = book.pop_back().expect("There should be enough workers");
+        workers.push(w);
+    }
+    workers
 }
