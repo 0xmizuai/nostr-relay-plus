@@ -107,6 +107,7 @@ async fn main() {
         while let Some((job_id, (sender, new_payload))) = aggr_rx.recv().await {
             match aggr_book.entry(job_id.clone()) {
                 Entry::Occupied(mut entry) => {
+                    tracing::debug!("Another result for job {} found", job_id);
                     let (workers, payload) = entry.get_mut();
 
                     if *payload != new_payload {
@@ -129,6 +130,7 @@ async fn main() {
                     // writing to the db or removing from book.
                     // The first N_WINNERS are still the same in the DB, regardless.
                     if workers.len() >= N_WINNERS {
+                        tracing::debug!("All the results for {} are consistent, sending", job_id);
                         let raw_data_id = new_payload.header.raw_data_id.clone();
                         let db_entry = FinishedJobs {
                             _id: raw_data_id,
@@ -148,6 +150,7 @@ async fn main() {
                     }
                 }
                 Entry::Vacant(entry) => {
+                    tracing::debug!("First time we see job {}", job_id);
                     entry.insert((vec![sender], new_payload));
                 }
             }

@@ -1,6 +1,7 @@
 use crate::crypto::CryptoHash;
 use nostr_plus_common::types::Timestamp;
 use serde::{Deserialize, Serialize};
+use strum_macros::{AsRefStr, EnumString};
 
 // ToDo: this just a placeholder struct
 #[derive(Serialize, Deserialize)]
@@ -45,4 +46,52 @@ pub struct NewJobPayload {
 pub struct ResultPayload {
     pub header: PayloadHeader,
     pub output: String,
+}
+
+#[derive(AsRefStr, EnumString, PartialEq)]
+pub enum JobType {
+    #[strum(serialize = "pow")]
+    PoW = 0,
+    #[strum(serialize = "classification")]
+    Classification,
+}
+
+impl JobType {
+    pub fn job_type(&self) -> u16 {
+        match self {
+            JobType::PoW => JobType::PoW as u16,
+            JobType::Classification => JobType::Classification as u16,
+        }
+    }
+
+    pub fn workers(&self) -> usize {
+        match self {
+            JobType::PoW => 1,
+            JobType::Classification => 3,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::job_protocol::JobType;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_job_type_deserialization() {
+        let job_type: JobType = "pow".parse().unwrap();
+        assert!(matches!(job_type, JobType::PoW));
+        let job_type: JobType = "classification".parse().unwrap();
+        assert!(matches!(job_type, JobType::Classification));
+        let maybe_job_type = JobType::from_str("PoW");
+        assert!(maybe_job_type.is_err());
+    }
+
+    #[test]
+    fn test_job_type_serialization() {
+        let job = JobType::PoW;
+        assert_eq!("pow", job.as_ref());
+        let job = JobType::Classification;
+        assert_eq!("classification", job.as_ref());
+    }
 }

@@ -3,7 +3,7 @@ use mongodb::{Client as DbClient, Collection};
 use nostr_client_plus::client::Client;
 use nostr_client_plus::db::{left_anti_join, RawDataEntry};
 use nostr_client_plus::event::UnsignedEvent;
-use nostr_client_plus::job_protocol::{Kind, NewJobPayload, PayloadHeader};
+use nostr_client_plus::job_protocol::{JobType, Kind, NewJobPayload, PayloadHeader};
 use nostr_client_plus::utils::get_timestamp;
 use nostr_crypto::eoa_signer::EoaSigner;
 use nostr_crypto::sender_signer::SenderSigner;
@@ -48,11 +48,16 @@ async fn main() {
     let entries = left_anti_join(&collection, "finished_jobs", limit_publish)
         .await
         .unwrap();
+
+    // Get type job id and name
+    let job_type = JobType::Classification.job_type();
+    let job_type_str = JobType::Classification.as_ref();
+
     for entry in entries {
         let entry: RawDataEntry = from_document(entry).unwrap();
         println!("Entry {}", entry._id.to_string());
         let header = PayloadHeader {
-            job_type: 0,
+            job_type,
             raw_data_id: entry._id,
             time: timestamp_now,
         };
@@ -65,7 +70,7 @@ async fn main() {
             client.sender(),
             timestamp_now,
             Kind::NEW_JOB,
-            vec![], // ToDo: there should be a `t` tag
+            vec![vec!["t".to_string(), job_type_str.to_string()]],
             serde_json::to_string(&payload).expect("Payload serialization failed"),
         );
         if client.publish(event).await.is_err() {

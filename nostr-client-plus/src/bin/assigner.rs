@@ -1,7 +1,8 @@
+use anyhow::{anyhow, Result};
 use linked_hash_map::LinkedHashMap;
 use nostr_client_plus::client::Client;
 use nostr_client_plus::event::UnsignedEvent;
-use nostr_client_plus::job_protocol::Kind;
+use nostr_client_plus::job_protocol::{JobType, Kind};
 use nostr_client_plus::request::{Filter, Request};
 use nostr_client_plus::utils::get_timestamp;
 use nostr_crypto::eoa_signer::EoaSigner;
@@ -16,16 +17,17 @@ use tokio::sync::Mutex;
 use tracing_subscriber::FmtSubscriber;
 
 mod utils;
+use crate::utils::get_single_tag_entry;
 use utils::get_private_key_from_name;
 
 type WorkersBook = LinkedHashMap<Sender, ()>;
-type JobQueue = VecDeque<RelayEvent>;
+type NumWorkers = usize;
+type JobQueue = VecDeque<(RelayEvent, NumWorkers)>;
 
 type PubStruct = (Vec<Sender>, RelayEvent); // Struct for passing jobs to assign
 
 // ToDo: we do not need so many, every few seconds new ones will show up.
 const MAX_WORKERS: usize = 10_000;
-const WORKERS_PER_JOB: usize = 3;
 
 #[tokio::main]
 async fn main() {
@@ -78,7 +80,9 @@ async fn main() {
         loop {
             tokio::select! {
                 Some(msg) = relay_channel.recv() => {
-                    handle_event(msg, &mut avail_workers, &mut job_queue, &pub_tx).await;
+                    if let Err(err) = handle_event(msg, &mut avail_workers, &mut job_queue, &pub_tx).await {
+                        tracing::error!("{err}");
+                    }
                 }
                 Some((workers, ev)) = pub_rx.recv() => {
                     tracing::debug!(r#"Sending "{}""#, ev.event.content);
@@ -127,7 +131,7 @@ async fn handle_event(
     book: &mut WorkersBook,
     queue: &mut JobQueue,
     pub_tx: &mpsc::Sender<PubStruct>,
-) {
+) -> Result<()> {
     match msg {
         RelayMessage::Event(ev) => {
             match ev.event.kind {
@@ -136,10 +140,19 @@ async fn handle_event(
                     book.insert(worker_id, ());
                     tracing::debug!("HB, now {}", book.len());
                     // Check if there is a queue to empty
-                    while !queue.is_empty() && book.len() >= WORKERS_PER_JOB {
+                    while !queue.is_empty() {
                         tracing::debug!("Emptying queue with {} el", queue.len());
-                        let ev = queue.pop_front().unwrap();
-                        let workers = get_workers(book);
+                        // peek first and check how many workers are needed
+                        if let Some((_, num_workers)) = queue.front() {
+                            if num_workers > &book.len() {
+                                tracing::debug!("Not enough workers for this event");
+                                break;
+                            }
+                        } else {
+                            tracing::error!("Queue should not be empty");
+                        }
+                        let (ev, num_workers) = queue.pop_front().unwrap();
+                        let workers = get_workers(book, num_workers);
                         pub_tx
                             .send((workers, ev))
                             .await
@@ -149,38 +162,50 @@ async fn handle_event(
                     if book.len() > MAX_WORKERS {
                         // Remove LRU
                         tracing::debug!("Trimming workers book ({} el)", book.len());
-                        book.pop_front().unwrap();
+                        book.pop_front();
                     }
+                    Ok(())
                 }
                 Kind::NEW_JOB => {
                     tracing::debug!("Got a job to assign");
-                    if book.len() < WORKERS_PER_JOB {
+                    let num_workers = validate_job(&ev)?;
+                    if book.len() < num_workers {
                         tracing::debug!("Not enough workers: {}", book.len());
                         // not enough workers, queue
-                        queue.push_back(ev);
+                        queue.push_back((ev, num_workers));
                     } else {
-                        let workers = get_workers(book);
+                        let workers = get_workers(book, num_workers);
                         pub_tx
                             .send((workers, ev))
                             .await
                             .expect("pub channel broken");
                     }
+                    Ok(())
                 }
-                _ => {}
+                _ => Ok(()),
             }
         }
         _ => {
             tracing::warn!("non-event message");
+            Ok(())
         }
     }
 }
 
 #[inline]
-fn get_workers(book: &mut WorkersBook) -> Vec<Sender> {
-    let mut workers = Vec::with_capacity(WORKERS_PER_JOB);
-    for _ in 0..WORKERS_PER_JOB {
+fn get_workers(book: &mut WorkersBook, num_workers: NumWorkers) -> Vec<Sender> {
+    tracing::debug!("get_workers: getting {} workers out of {}", num_workers, book.len());
+    let mut workers = Vec::with_capacity(num_workers);
+    for _ in 0..num_workers {
         let (w, _) = book.pop_back().expect("There should be enough workers");
         workers.push(w);
     }
     workers
+}
+
+fn validate_job(ev: &RelayEvent) -> Result<NumWorkers> {
+    let job_type_name =
+        get_single_tag_entry('t', &ev.event.tags)?.ok_or(anyhow!("Missing t tag"))?;
+    let job_type: JobType = job_type_name.parse()?;
+    Ok(job_type.workers())
 }
