@@ -12,13 +12,20 @@ started before the other services.
 
 ### Assigner
 
+Assigner accepts one environment variable: `RELAY_URL`.
+`RELAY_URL` is optional and it defaults to `ws://127.0.0.1:3031`.
+
+Assigner needs to run with a configuration file from which it reads the whitelisted senders.
+If not present or empty, it won't start.
+Job messages whose senders are not listed won't be assigned and are ignored.
+
 ```shell
-cargo run --release --package nostr-client-plus --bin assigner <nostr-relay url>
+cargo run --release --package nostr-client-plus --bin assigner -- <config file>
 ```
 
-For example
+For example, using the one provided in `src/bin`
 ```shell
-cargo run --release --package nostr-client-plus --bin assigner "ws://127.0.0.1:3031" # if url not passed, this one is the default
+cargo run --release --package nostr-client-plus --bin assigner -- nostr-client-plus/src/bin/config.toml
 ```
 
 ### Publisher

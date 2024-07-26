@@ -1,0 +1,5 @@
+[assigner]
+# This is a list of pubkeys (in hex form) belonging to Publishers allowed to post Jobs
+whitelist = [
+    "0100000086767c3c63cf35b602c71bfca53bb6515b74bb1d", # the initial 01000000 denotes EOA address
+]

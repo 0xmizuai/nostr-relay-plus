@@ -10,7 +10,9 @@ use nostr_crypto::sender_signer::SenderSigner;
 use nostr_plus_common::relay_event::RelayEvent;
 use nostr_plus_common::relay_message::RelayMessage;
 use nostr_plus_common::sender::Sender;
-use std::collections::VecDeque;
+use serde::Deserialize;
+use std::collections::{BTreeSet, VecDeque};
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
@@ -31,16 +33,42 @@ const MAX_WORKERS: usize = 10_000;
 
 #[tokio::main]
 async fn main() {
+    // Define needed env variables
+    let relay_url = std::env::var("RELAY_URL").unwrap_or("ws://127.0.0.1:3033".to_string());
+
     // Command line parsing
     let args: Vec<String> = std::env::args().collect();
-    let relay_url = match args.len() {
-        1 => String::from("ws://127.0.0.1:3033"),
+    let config_file_path = match args.len() {
+        1 => {
+            eprintln!("Missing config file path");
+            return;
+        }
         2 => args[1].clone(),
         _ => {
             eprintln!("Too many arguments");
             return;
         }
     };
+
+    // Get configuration from file
+    let config = match get_config(config_file_path) {
+        Ok(val) => val,
+        Err(err) => {
+            eprintln!("{err}");
+            return;
+        }
+    };
+    // Check whitelist is not empty and then create a set out of it
+    if config.whitelist.is_empty() {
+        eprintln!("Whitelist cannot be empty");
+        return;
+    }
+    let whitelist: BTreeSet<Sender> = config
+        .whitelist
+        .into_iter()
+        .map(|s| hex::decode(s).expect("Cannot decode"))
+        .map(|s| Sender::from_bytes(&s).expect("Cannot convert from bytes"))
+        .collect();
 
     // Logger setup
     let subscriber = FmtSubscriber::builder()
@@ -73,14 +101,20 @@ async fn main() {
 
         // Data structure to keep track of most recent workers
         // ToDo: We don't use the value, so a HashSet maintaining insertion order, should suffice
-        let mut avail_workers = WorkersBook::new();
+        let avail_workers = WorkersBook::new();
         // Queue of jobs that cannot be assigned immediately
-        let mut job_queue = VecDeque::new();
+        let job_queue = VecDeque::new();
+
+        let mut context = Context {
+            book: avail_workers,
+            queue: job_queue,
+            whitelist,
+        };
 
         loop {
             tokio::select! {
                 Some(msg) = relay_channel.recv() => {
-                    if let Err(err) = handle_event(msg, &mut avail_workers, &mut job_queue, &pub_tx).await {
+                    if let Err(err) = handle_event(msg, &mut context, &pub_tx).await {
                         tracing::error!("{err}");
                     }
                 }
@@ -128,8 +162,7 @@ async fn main() {
 // If Some() is returned, then the event needs to be re-scheduled
 async fn handle_event(
     msg: RelayMessage,
-    book: &mut WorkersBook,
-    queue: &mut JobQueue,
+    ctx: &mut Context,
     pub_tx: &mpsc::Sender<PubStruct>,
 ) -> Result<()> {
     match msg {
@@ -137,44 +170,44 @@ async fn handle_event(
             match ev.event.kind {
                 Kind::ALIVE => {
                     let worker_id = ev.event.sender.clone();
-                    book.insert(worker_id, ());
-                    tracing::debug!("HB, now {}", book.len());
+                    ctx.book.insert(worker_id, ());
+                    tracing::debug!("HB, now {}", ctx.book.len());
                     // Check if there is a queue to empty
-                    while !queue.is_empty() {
-                        tracing::debug!("Emptying queue with {} el", queue.len());
+                    while !ctx.queue.is_empty() {
+                        tracing::debug!("Emptying queue with {} el", ctx.queue.len());
                         // peek first and check how many workers are needed
-                        if let Some((_, num_workers)) = queue.front() {
-                            if num_workers > &book.len() {
+                        if let Some((_, num_workers)) = ctx.queue.front() {
+                            if num_workers > &ctx.book.len() {
                                 tracing::debug!("Not enough workers for this event");
                                 break;
                             }
                         } else {
                             tracing::error!("Queue should not be empty");
                         }
-                        let (ev, num_workers) = queue.pop_front().unwrap();
-                        let workers = get_workers(book, num_workers);
+                        let (ev, num_workers) = ctx.queue.pop_front().unwrap();
+                        let workers = get_workers(&mut ctx.book, num_workers);
                         pub_tx
                             .send((workers, ev))
                             .await
                             .expect("pub channel broken");
                     }
                     // Keep the number of workers below a certain threshold
-                    if book.len() > MAX_WORKERS {
+                    if ctx.book.len() > MAX_WORKERS {
                         // Remove LRU
-                        tracing::debug!("Trimming workers book ({} el)", book.len());
-                        book.pop_front();
+                        tracing::debug!("Trimming workers book ({} el)", ctx.book.len());
+                        ctx.book.pop_front();
                     }
                     Ok(())
                 }
                 Kind::NEW_JOB => {
                     tracing::debug!("Got a job to assign");
-                    let num_workers = validate_job(&ev)?;
-                    if book.len() < num_workers {
-                        tracing::debug!("Not enough workers: {}", book.len());
+                    let num_workers = validate_job(&ev, &ctx)?;
+                    if ctx.book.len() < num_workers {
+                        tracing::debug!("Not enough workers: {}", ctx.book.len());
                         // not enough workers, queue
-                        queue.push_back((ev, num_workers));
+                        ctx.queue.push_back((ev, num_workers));
                     } else {
-                        let workers = get_workers(book, num_workers);
+                        let workers = get_workers(&mut ctx.book, num_workers);
                         pub_tx
                             .send((workers, ev))
                             .await
@@ -194,7 +227,11 @@ async fn handle_event(
 
 #[inline]
 fn get_workers(book: &mut WorkersBook, num_workers: NumWorkers) -> Vec<Sender> {
-    tracing::debug!("get_workers: getting {} workers out of {}", num_workers, book.len());
+    tracing::debug!(
+        "get_workers: getting {} workers out of {}",
+        num_workers,
+        book.len()
+    );
     let mut workers = Vec::with_capacity(num_workers);
     for _ in 0..num_workers {
         let (w, _) = book.pop_back().expect("There should be enough workers");
@@ -203,9 +240,40 @@ fn get_workers(book: &mut WorkersBook, num_workers: NumWorkers) -> Vec<Sender> {
     workers
 }
 
-fn validate_job(ev: &RelayEvent) -> Result<NumWorkers> {
+fn validate_job(ev: &RelayEvent, ctx: &Context) -> Result<NumWorkers> {
+    // Is the sender authorized?
+    if !ctx.whitelist.contains(&ev.event.sender) {
+        return Err(anyhow!("Sender not whitelisted"));
+    }
+    // Does the message belong to the sender?
+    ev.event.verify()?;
+
     let job_type_name =
         get_single_tag_entry('t', &ev.event.tags)?.ok_or(anyhow!("Missing t tag"))?;
     let job_type: JobType = job_type_name.parse()?;
     Ok(job_type.workers())
+}
+
+struct Context {
+    book: WorkersBook,
+    queue: JobQueue,
+    whitelist: BTreeSet<Sender>,
+}
+
+#[derive(Deserialize)]
+struct Config {
+    whitelist: Vec<String>,
+}
+
+fn get_config<P: AsRef<Path>>(path: P) -> Result<Config> {
+    use std::fs;
+
+    let content = fs::read_to_string(path)?;
+    let config: Config = toml::from_str::<toml::Value>(&content)
+        .expect("error parsing content")
+        .get("assigner")
+        .expect("no assigner section")
+        .clone()
+        .try_into()?;
+    Ok(config)
 }
