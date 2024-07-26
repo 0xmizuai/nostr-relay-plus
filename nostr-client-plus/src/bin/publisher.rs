@@ -8,14 +8,13 @@ use nostr_client_plus::utils::get_timestamp;
 use nostr_crypto::eoa_signer::EoaSigner;
 use nostr_crypto::sender_signer::SenderSigner;
 
-mod utils;
-use utils::get_private_key_from_name;
-
 #[tokio::main]
 async fn main() {
     // Define needed env variables
+    dotenv::dotenv().ok();
     let db_url = std::env::var("MONGO_URL").expect("MONGO_URL is not set");
     let relay_url = std::env::var("RELAY_URL").unwrap_or("ws://127.0.0.1:3033".to_string());
+    let raw_private_key = std::env::var("PUBLISHER_PRIVATE_KEY").unwrap();
 
     // Command line parsing
     let args: Vec<String> = std::env::args().collect();
@@ -35,8 +34,8 @@ async fn main() {
         .database("test-preprocessor");
     let collection: Collection<RawDataEntry> = db.collection("raw_data");
 
-    // Get a silly private key based on a string identifying the service.
-    let private_key = get_private_key_from_name("Publisher").unwrap();
+    // Private key
+    let private_key = hex::decode(raw_private_key).unwrap().try_into().unwrap();
 
     // Create client
     let signer = EoaSigner::from_bytes(&private_key);

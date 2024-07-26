@@ -32,9 +32,10 @@ const MAX_WORKERS: usize = 10_000;
 
 #[tokio::main]
 async fn main() {
-    dotenv::dotenv().ok();
     // Define needed env variables
+    dotenv::dotenv().ok();
     let relay_url = std::env::var("RELAY_URL").unwrap_or("ws://127.0.0.1:3033".to_string());
+    let raw_private_key = std::env::var("ASSIGNER_PRIVATE_KEY").unwrap();
 
     // Command line parsing
     let args: Vec<String> = std::env::args().collect();
@@ -76,12 +77,9 @@ async fn main() {
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
-    // Get a silly private key based on a string identifying the service.
-    let raw_private_key = std::env::var("ASSIGNER_PRIAVTE_KEY").unwrap();
-    let private_key = hex::decode(raw_private_key)
-        .unwrap()
-        .try_into()
-        .unwrap();
+    // Private key
+    let private_key = hex::decode(raw_private_key).unwrap().try_into().unwrap();
+
     // Create nostr-relay client
     let signer = EoaSigner::from_bytes(&private_key);
     let mut client = Client::new(SenderSigner::Eoa(signer));
