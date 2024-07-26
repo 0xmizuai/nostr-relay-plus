@@ -4,6 +4,4 @@ buildCommand = "cargo build --release"
 
 [deploy]
 startCommand = "cargo run --release --package nostr-relay -- --remote"
-healthcheckPath = "/health"
-healthcheckTimeout = 100
 restartPolicyType = "never"
