@@ -28,7 +28,7 @@ impl Kind {
     pub const RESOLUTION: u16 = Kind::Resolution as u16;
 }
 
-#[derive(PartialEq, Eq, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Serialize, Deserialize, Clone)]
 pub struct PayloadHeader {
     pub job_type: u16,           // ToDo: job types need to be codified
     pub raw_data_id: CryptoHash, // we need in order to cross-reference finished_jobs db entries with raw_data
@@ -42,7 +42,7 @@ pub struct NewJobPayload {
     pub config: Option<AIRuntimeConfig>,
 }
 
-#[derive(PartialEq, Eq, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Serialize, Deserialize, Clone)]
 pub struct ResultPayload {
     pub header: PayloadHeader,
     pub output: String,

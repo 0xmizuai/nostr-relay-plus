@@ -98,6 +98,34 @@ async fn main() {
         let mut aggr_book: HashMap<String, (Vec<Sender>, ResultPayload)> = HashMap::new();
 
         while let Some((job_id, (sender, new_payload))) = aggr_rx.recv().await {
+            // TODO: parse JobType
+            let job_type = new_payload.header.job_type;
+            let n_winners = match job_type {
+                0 => 1,
+                1 => 3,
+                _ => unreachable!()
+            };
+
+            if n_winners <= 1 {
+                tracing::debug!("The job needs only one worker! {}", job_id);
+                let raw_data_id = new_payload.header.raw_data_id.clone();
+                let db_entry = FinishedJobs {
+                    _id: raw_data_id,
+                    workers: vec![sender.clone()], // if we remove first, no need to clone but this is safer
+                    timestamp: get_timestamp(),
+                    result: new_payload.clone(),
+                    job_type,
+                };
+                match collection.insert_one(db_entry, None).await {
+                    Ok(_) => {}
+                    Err(err) => {
+                        // We log and that's it, we keep the entry in book for later inspection
+                        tracing::error!("Cannot write finished job to db: {}", err);
+                    }
+                }
+                continue;
+            }
+            
             match aggr_book.entry(job_id.clone()) {
                 Entry::Occupied(mut entry) => {
                     tracing::debug!("Another result for job {} found", job_id);
@@ -122,14 +150,6 @@ async fn main() {
                     // We allow the case of len > N_WORKERS for cases where there are issues
                     // writing to the db or removing from book.
                     // The first N_WINNERS are still the same in the DB, regardless.
-
-                    // TODO: parse JobType
-                    let job_type = new_payload.header.job_type;
-                    let n_winners = match job_type {
-                        0 => 1,
-                        1 => 3,
-                        _ => unreachable!()
-                    };
 
                     if workers.len() >= n_winners {
                         tracing::debug!("All the results for {} are consistent, sending", job_id);
