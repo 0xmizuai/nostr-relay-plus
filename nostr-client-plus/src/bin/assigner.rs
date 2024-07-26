@@ -33,6 +33,7 @@ const MAX_WORKERS: usize = 10_000;
 
 #[tokio::main]
 async fn main() {
+    dotenv::dotenv().ok();
     // Define needed env variables
     let relay_url = std::env::var("RELAY_URL").unwrap_or("ws://127.0.0.1:3033".to_string());
 

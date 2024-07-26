@@ -20,20 +20,13 @@ use crate::utils::{get_private_key_from_name, get_single_tag_entry};
 
 type AggrMessage = (String, (Sender, ResultPayload));
 
-const N_WINNERS: usize = 3;
+// const N_WINNERS: usize = 3;
 
 #[tokio::main]
 async fn main() {
+    dotenv::dotenv().ok();
     // Command line parsing
-    let args: Vec<String> = std::env::args().collect();
-    let relay_url = match args.len() {
-        1 => String::from("ws://127.0.0.1:3033"),
-        2 => args[1].clone(),
-        _ => {
-            eprintln!("Too many arguments");
-            return;
-        }
-    };
+    let relay_url = std::env::var("RELAY_URL").unwrap_or("ws://127.0.0.1:3033".to_string());
 
     // Logger setup
     let subscriber = FmtSubscriber::builder()
@@ -46,7 +39,7 @@ async fn main() {
     let db = DbClient::with_uri_str(db_url)
         .await
         .expect("Cannot connect to db")
-        .database("test-preprocessor");
+        .database("mine");
     let collection: Collection<FinishedJobs> = db.collection("finished_jobs");
 
     // Get a silly private key based on a string identifying the service.
@@ -129,7 +122,16 @@ async fn main() {
                     // We allow the case of len > N_WORKERS for cases where there are issues
                     // writing to the db or removing from book.
                     // The first N_WINNERS are still the same in the DB, regardless.
-                    if workers.len() >= N_WINNERS {
+
+                    // TODO: parse JobType
+                    let job_type = new_payload.header.job_type;
+                    let n_winners = match job_type {
+                        0 => 1,
+                        1 => 3,
+                        _ => unreachable!()
+                    };
+
+                    if workers.len() >= n_winners {
                         tracing::debug!("All the results for {} are consistent, sending", job_id);
                         let raw_data_id = new_payload.header.raw_data_id.clone();
                         let db_entry = FinishedJobs {
@@ -137,6 +139,7 @@ async fn main() {
                             workers: workers.clone(), // if we remove first, no need to clone but this is safer
                             timestamp: get_timestamp(),
                             result: new_payload,
+                            job_type,
                         };
                         match collection.insert_one(db_entry, None).await {
                             Ok(_) => {
