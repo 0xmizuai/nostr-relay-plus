@@ -20,7 +20,6 @@ use tracing_subscriber::FmtSubscriber;
 
 mod utils;
 use crate::utils::get_single_tag_entry;
-use utils::get_private_key_from_name;
 
 type WorkersBook = LinkedHashMap<Sender, ()>;
 type NumWorkers = usize;
@@ -78,8 +77,11 @@ async fn main() {
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
     // Get a silly private key based on a string identifying the service.
-    let private_key = get_private_key_from_name("Assigner").unwrap();
-
+    let raw_private_key = std::env::var("ASSIGNER_PRIAVTE_KEY").unwrap();
+    let private_key = hex::decode(raw_private_key)
+        .unwrap()
+        .try_into()
+        .unwrap();
     // Create nostr-relay client
     let signer = EoaSigner::from_bytes(&private_key);
     let mut client = Client::new(SenderSigner::Eoa(signer));

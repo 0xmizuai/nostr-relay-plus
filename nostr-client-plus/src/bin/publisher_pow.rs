@@ -8,7 +8,6 @@ use nostr_crypto::sender_signer::SenderSigner;
 
 mod utils;
 use rand::random;
-use utils::get_private_key_from_name;
 
 #[tokio::main]
 async fn main() {
@@ -27,7 +26,12 @@ async fn main() {
     };
 
     // Get a silly private key based on a string identifying the service.
-    let private_key = get_private_key_from_name("Publisher").unwrap();
+    // let private_key = get_private_key_from_name("Publisher").unwrap();
+    let raw_private_key = std::env::var("PUBLISHER_PRIAVTE_KEY").unwrap();
+    let private_key = hex::decode(raw_private_key)
+        .unwrap()
+        .try_into()
+        .unwrap();
 
     // Create client
     let signer = EoaSigner::from_bytes(&private_key);
