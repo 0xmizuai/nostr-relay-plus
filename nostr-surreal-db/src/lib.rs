@@ -26,7 +26,7 @@ impl DB {
     pub async fn connect(
         address: &str, username: &str,  password: &str,
     ) -> Result<Self> {
-        let db = Surreal::new::<Wss>(address).await?;
+        let db = Surreal::new::<Ws>(address).await?;
 
         db.signin(Root { username, password }).await?;
 
