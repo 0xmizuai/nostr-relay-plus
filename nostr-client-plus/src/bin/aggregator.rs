@@ -27,6 +27,7 @@ async fn main() {
     dotenv::dotenv().ok();
     // Command line parsing
     let relay_url = std::env::var("RELAY_URL").unwrap_or("ws://127.0.0.1:3033".to_string());
+    let supported_version = std::env::var("VERSION").unwrap_or("v0.0.1".to_string());
 
     // Logger setup
     let subscriber = FmtSubscriber::builder()
@@ -105,6 +106,11 @@ async fn main() {
                 1 => 3,
                 _ => unreachable!()
             };
+
+            if new_payload.version != supported_version {
+                tracing::error!("Version mismatch");
+                continue;
+            }
 
             if n_winners <= 1 {
                 tracing::debug!("The job needs only one worker! {}", job_id);

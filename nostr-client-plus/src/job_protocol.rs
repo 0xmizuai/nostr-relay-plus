@@ -46,6 +46,7 @@ pub struct NewJobPayload {
 pub struct ResultPayload {
     pub header: PayloadHeader,
     pub output: String,
+    pub version: String,
 }
 
 #[derive(AsRefStr, EnumString, PartialEq)]
