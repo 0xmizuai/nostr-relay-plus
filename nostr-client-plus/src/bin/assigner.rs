@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use linked_hash_map::LinkedHashMap;
+use nostr_client_plus::__private::config::get_config;
 use nostr_client_plus::client::Client;
 use nostr_client_plus::event::UnsignedEvent;
 use nostr_client_plus::job_protocol::{JobType, Kind};
@@ -10,9 +11,7 @@ use nostr_crypto::sender_signer::SenderSigner;
 use nostr_plus_common::relay_event::RelayEvent;
 use nostr_plus_common::relay_message::RelayMessage;
 use nostr_plus_common::sender::Sender;
-use serde::Deserialize;
 use std::collections::{BTreeSet, VecDeque};
-use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
@@ -259,22 +258,4 @@ struct Context {
     book: WorkersBook,
     queue: JobQueue,
     whitelist: BTreeSet<Sender>,
-}
-
-#[derive(Deserialize)]
-struct Config {
-    whitelist: Vec<String>,
-}
-
-fn get_config<P: AsRef<Path>>(path: P) -> Result<Config> {
-    use std::fs;
-
-    let content = fs::read_to_string(path)?;
-    let config: Config = toml::from_str::<toml::Value>(&content)
-        .expect("error parsing content")
-        .get("assigner")
-        .expect("no assigner section")
-        .clone()
-        .try_into()?;
-    Ok(config)
 }
