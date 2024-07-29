@@ -1,21 +1,20 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use serde::Deserialize;
 use std::path::Path;
+use toml::Value;
 
 #[derive(Deserialize)]
 pub struct Config {
     pub whitelist: Vec<String>,
 }
 
-pub fn get_config<P: AsRef<Path>>(path: P) -> Result<Config> {
+pub fn load_config<P: AsRef<Path>>(path: P, section: &str) -> Result<Value> {
     use std::fs;
 
     let content = fs::read_to_string(path)?;
-    let config: Config = toml::from_str::<toml::Value>(&content)
-        .expect("error parsing content")
-        .get("assigner")
-        .expect("no assigner section")
-        .clone()
-        .try_into()?;
+    let config: Value = toml::from_str::<Value>(&content)?
+        .get(section)
+        .ok_or_else(|| anyhow!("section not found"))?
+        .clone();
     Ok(config)
 }

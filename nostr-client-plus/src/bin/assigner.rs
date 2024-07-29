@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use linked_hash_map::LinkedHashMap;
-use nostr_client_plus::__private::config::get_config;
+use nostr_client_plus::__private::config::{load_config, Config};
 use nostr_client_plus::client::Client;
 use nostr_client_plus::event::UnsignedEvent;
 use nostr_client_plus::job_protocol::{JobType, Kind};
@@ -31,6 +31,13 @@ const MAX_WORKERS: usize = 10_000;
 
 #[tokio::main]
 async fn main() {
+    if let Err(err) = run().await {
+        eprintln!("{err}");
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> Result<()> {
     // Define needed env variables
     dotenv::dotenv().ok();
     let relay_url = std::env::var("RELAY_URL").unwrap_or("ws://127.0.0.1:3033".to_string());
@@ -40,28 +47,20 @@ async fn main() {
     let args: Vec<String> = std::env::args().collect();
     let config_file_path = match args.len() {
         1 => {
-            eprintln!("Missing config file path");
-            return;
+            return Err(anyhow!("Missing config file path"));
         }
         2 => args[1].clone(),
         _ => {
-            eprintln!("Too many arguments");
-            return;
+            return Err(anyhow!("Too many arguments"));
         }
     };
 
     // Get configuration from file
-    let config = match get_config(config_file_path) {
-        Ok(val) => val,
-        Err(err) => {
-            eprintln!("{err}");
-            return;
-        }
-    };
+    let config: Config = load_config(config_file_path, "assigner")?.try_into()?;
+
     // Check whitelist is not empty and then create a set out of it
     if config.whitelist.is_empty() {
-        eprintln!("Whitelist cannot be empty");
-        return;
+        return Err(anyhow!("whitelist is empty"));
     }
     let whitelist: BTreeSet<Sender> = config
         .whitelist
@@ -157,6 +156,7 @@ async fn main() {
 
     event_handler.await.unwrap();
     tracing::info!("Shutting down gracefully");
+    Ok(())
 }
 
 // If Some() is returned, then the event needs to be re-scheduled
