@@ -4,7 +4,8 @@ use std::path::Path;
 use toml::Value;
 
 #[derive(Deserialize)]
-pub struct Config {
+pub struct AssignerConfig {
+    pub metrics_port: u16,
     pub whitelist: Vec<String>,
 }
 

@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use linked_hash_map::LinkedHashMap;
-use nostr_client_plus::__private::config::{load_config, Config};
+use nostr_client_plus::__private::config::{load_config, AssignerConfig};
 use nostr_client_plus::client::Client;
 use nostr_client_plus::event::UnsignedEvent;
 use nostr_client_plus::job_protocol::{JobType, Kind};
@@ -56,7 +56,7 @@ async fn run() -> Result<()> {
     };
 
     // Get configuration from file
-    let config: Config = load_config(config_file_path, "assigner")?.try_into()?;
+    let config: AssignerConfig = load_config(config_file_path, "assigner")?.try_into()?;
 
     // Check whitelist is not empty and then create a set out of it
     if config.whitelist.is_empty() {
