@@ -5,7 +5,6 @@ use k256::sha2::digest::typenum::Le;
 use prometheus::Registry;
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tracing::Level;
 
 pub async fn get_metrics_app(
     metrics_registry: Arc<Registry>,

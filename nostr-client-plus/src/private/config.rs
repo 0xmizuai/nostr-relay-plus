@@ -9,6 +9,11 @@ pub struct AssignerConfig {
     pub whitelist: Vec<String>,
 }
 
+#[derive(Deserialize)]
+pub struct AggregatorConfig {
+    pub metrics_socket_addr: String,
+}
+
 pub fn load_config<P: AsRef<Path>>(path: P, section: &str) -> Result<Value> {
     use std::fs;
 
