@@ -24,6 +24,13 @@ type AggrMessage = (String, (Sender, ResultPayload));
 
 #[tokio::main]
 async fn main() {
+    if let Err(err) = run().await {
+        eprintln!("{err}");
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> Result<()> {
     dotenv::dotenv().ok();
     // Command line parsing
     let relay_url = std::env::var("RELAY_URL").unwrap_or("ws://127.0.0.1:3033".to_string());
@@ -203,6 +210,7 @@ async fn main() {
     listener_handler.await.unwrap();
     aggregator_handler.await.unwrap();
     tracing::info!("Shutting down gracefully");
+    Ok(())
 }
 
 fn get_result_payload(ev: &RelayEvent) -> Result<ResultPayload> {
