@@ -90,9 +90,9 @@ async fn run() -> Result<()> {
 
     // Metrics
     register_metrics();
-    let port = config.metrics_port;
+    let socket_addr = config.metrics_socket_addr;
     let shared_registry = Arc::new(REGISTRY.clone());
-    let (router, listener) = get_metrics_app(shared_registry, port).await;
+    let (router, listener) = get_metrics_app(shared_registry, socket_addr.as_str()).await;
     let metrics_handle = tokio::spawn(async move {
         axum::serve(listener, router).await.unwrap();
     });

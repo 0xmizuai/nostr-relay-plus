@@ -5,7 +5,7 @@ use toml::Value;
 
 #[derive(Deserialize)]
 pub struct AssignerConfig {
-    pub metrics_port: u16,
+    pub metrics_socket_addr: String,
     pub whitelist: Vec<String>,
 }
 

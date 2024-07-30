@@ -7,12 +7,15 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tracing::Level;
 
-pub async fn get_metrics_app(metrics_registry: Arc<Registry>, port: u16) -> (Router, TcpListener) {
+pub async fn get_metrics_app(
+    metrics_registry: Arc<Registry>,
+    socker_addr: &str,
+) -> (Router, TcpListener) {
     let router = Router::new()
         .route("/metrics", get(metrics_handler))
         .with_state(metrics_registry);
 
-    let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+    let listener = TcpListener::bind(socker_addr)
         .await
         .expect("Cannot bind metrics server");
     (router, listener)
