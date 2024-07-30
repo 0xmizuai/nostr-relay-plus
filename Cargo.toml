@@ -20,6 +20,7 @@ members = [
 
 [workspace.dependencies]
 alloy-primitives = { version = "0.6", features = ["serde"] }
+axum = { version = "0.7", features = ["ws"]}
 nostr-crypto = { path = "./nostr-crypto" }
 nostr-plus-common = { path = "./nostr-plus-common" }
 nostr-surreal-db = { path = "./nostr-surreal-db" }
