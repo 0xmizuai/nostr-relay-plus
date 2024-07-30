@@ -1,6 +1,8 @@
 use anyhow::{anyhow, Result};
+use lazy_static::lazy_static;
 use linked_hash_map::LinkedHashMap;
 use nostr_client_plus::__private::config::{load_config, AssignerConfig};
+use nostr_client_plus::__private::metrics::get_metrics_app;
 use nostr_client_plus::client::Client;
 use nostr_client_plus::event::UnsignedEvent;
 use nostr_client_plus::job_protocol::{JobType, Kind};
@@ -11,6 +13,7 @@ use nostr_crypto::sender_signer::SenderSigner;
 use nostr_plus_common::relay_event::RelayEvent;
 use nostr_plus_common::relay_message::RelayMessage;
 use nostr_plus_common::sender::Sender;
+use prometheus::{IntCounter, IntGauge, Registry};
 use std::collections::{BTreeSet, VecDeque};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -28,6 +31,16 @@ type PubStruct = (Vec<Sender>, RelayEvent); // Struct for passing jobs to assign
 
 // ToDo: we do not need so many, every few seconds new ones will show up.
 const MAX_WORKERS: usize = 10_000;
+
+lazy_static! {
+    pub static ref REGISTRY: Registry = Registry::default();
+    pub static ref ASSIGNED_JOBS: IntCounter =
+        IntCounter::new("assigned_jobs", "Assigned Jobs").expect("Failed to create assigned_jobs");
+    pub static ref CACHED_JOBS: IntGauge =
+        IntGauge::new("cached_jobs", "Cached Jobs").expect("Failed to create cached_jobs");
+    pub static ref WORKERS_ONLINE: IntGauge =
+        IntGauge::new("workers_online", "Workers Online").expect("Failed to create workers_online");
+}
 
 #[tokio::main]
 async fn main() {
@@ -74,6 +87,15 @@ async fn run() -> Result<()> {
         .with_max_level(tracing::Level::DEBUG)
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+
+    // Metrics
+    register_metrics();
+    let port = config.metrics_port;
+    let shared_registry = Arc::new(REGISTRY.clone());
+    let (router, listener) = get_metrics_app(shared_registry, port).await;
+    let metrics_handle = tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
 
     // Private key
     let private_key = hex::decode(raw_private_key).unwrap().try_into().unwrap();
@@ -133,6 +155,7 @@ async fn run() -> Result<()> {
                         ev.event.content,
                     );
                     client_eh.lock().await.publish(event).await.expect("Failed to publish");
+                    ASSIGNED_JOBS.inc();
                 }
                 else => {
                     tracing::warn!("Unexpected select event");
@@ -155,6 +178,7 @@ async fn run() -> Result<()> {
     tracing::info!("Subscribed to NewJob and Alive");
 
     event_handler.await.unwrap();
+    metrics_handle.await.unwrap();
     tracing::info!("Shutting down gracefully");
     Ok(())
 }
@@ -170,7 +194,9 @@ async fn handle_event(
             match ev.event.kind {
                 Kind::ALIVE => {
                     let worker_id = ev.event.sender.clone();
-                    ctx.book.insert(worker_id, ());
+                    if let None = ctx.book.insert(worker_id, ()) {
+                        WORKERS_ONLINE.inc();
+                    }
                     tracing::debug!("HB, now {}", ctx.book.len());
                     // Check if there is a queue to empty
                     while !ctx.queue.is_empty() {
@@ -185,6 +211,7 @@ async fn handle_event(
                             tracing::error!("Queue should not be empty");
                         }
                         let (ev, num_workers) = ctx.queue.pop_front().unwrap();
+                        CACHED_JOBS.dec();
                         let workers = get_workers(&mut ctx.book, num_workers);
                         pub_tx
                             .send((workers, ev))
@@ -195,7 +222,9 @@ async fn handle_event(
                     if ctx.book.len() > MAX_WORKERS {
                         // Remove LRU
                         tracing::debug!("Trimming workers book ({} el)", ctx.book.len());
-                        ctx.book.pop_front();
+                        if ctx.book.pop_front().is_some() {
+                            WORKERS_ONLINE.dec();
+                        }
                     }
                     Ok(())
                 }
@@ -206,6 +235,7 @@ async fn handle_event(
                         tracing::debug!("Not enough workers: {}", ctx.book.len());
                         // not enough workers, queue
                         ctx.queue.push_back((ev, num_workers));
+                        CACHED_JOBS.inc();
                     } else {
                         let workers = get_workers(&mut ctx.book, num_workers);
                         pub_tx
@@ -237,6 +267,7 @@ fn get_workers(book: &mut WorkersBook, num_workers: NumWorkers) -> Vec<Sender> {
         let (w, _) = book.pop_back().expect("There should be enough workers");
         workers.push(w);
     }
+    WORKERS_ONLINE.sub(num_workers as i64);
     workers
 }
 
@@ -258,4 +289,16 @@ struct Context {
     book: WorkersBook,
     queue: JobQueue,
     whitelist: BTreeSet<Sender>,
+}
+
+fn register_metrics() {
+    REGISTRY
+        .register(Box::new(ASSIGNED_JOBS.clone()))
+        .expect("Cannot register assigned_jobs");
+    REGISTRY
+        .register(Box::new(CACHED_JOBS.clone()))
+        .expect("Cannot register cached_jobs");
+    REGISTRY
+        .register(Box::new(WORKERS_ONLINE.clone()))
+        .expect("Cannot register workers_online");
 }
