@@ -41,7 +41,7 @@ async fn main() -> Result<()> {
         .unwrap_or("3033".into())
         .parse()
         .expect("failed to convert to number");
-    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}"))
+    let listener = tokio::net::TcpListener::bind(format!(":::{port}"))
         .await
         .unwrap();
     log::info!("Listening on port 3033");
