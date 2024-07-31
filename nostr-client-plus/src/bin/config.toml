@@ -1,5 +1,5 @@
 [assigner]
-metrics_socket_addr = "0.0.0.0:8880" # or 127.0.0.1:8880 if prometheus is local
+metrics_socket_addr = ":::8880" # or 127.0.0.1:8880 if prometheus is local
 
 # This is a list of pubkeys (in hex form) belonging to Publishers allowed to post Jobs
 whitelist = [
@@ -7,4 +7,4 @@ whitelist = [
 ]
 
 [aggregator]
-metrics_socket_addr = "0.0.0.0:8881" # or 127.0.0.1:8881 if prometheus is local
+metrics_socket_addr = ":::8881" # or 127.0.0.1:8881 if prometheus is local
