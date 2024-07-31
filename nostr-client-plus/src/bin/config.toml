@@ -1,5 +1,10 @@
 [assigner]
+metrics_socket_addr = "0.0.0.0:8880" # or 127.0.0.1:8880 if prometheus is local
+
 # This is a list of pubkeys (in hex form) belonging to Publishers allowed to post Jobs
 whitelist = [
     "010000004b26f83e2699e975473a0d738158a5ebc9d8bc4c", # the initial 01000000 denotes EOA address
 ]
+
+[aggregator]
+metrics_socket_addr = "0.0.0.0:8881" # or 127.0.0.1:8881 if prometheus is local

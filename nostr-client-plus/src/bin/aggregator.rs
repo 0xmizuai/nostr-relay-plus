@@ -1,5 +1,8 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
+use lazy_static::lazy_static;
 use mongodb::{Client as DbClient, Collection};
+use nostr_client_plus::__private::config::{load_config, AggregatorConfig};
+use nostr_client_plus::__private::metrics::get_metrics_app;
 use nostr_client_plus::client::Client;
 use nostr_client_plus::db::FinishedJobs;
 use nostr_client_plus::job_protocol::{Kind, ResultPayload};
@@ -10,8 +13,10 @@ use nostr_crypto::sender_signer::SenderSigner;
 use nostr_plus_common::relay_event::RelayEvent;
 use nostr_plus_common::relay_message::RelayMessage;
 use nostr_plus_common::sender::Sender;
+use prometheus::{IntCounter, Registry};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing_subscriber::FmtSubscriber;
 
@@ -20,20 +25,55 @@ use crate::utils::{get_private_key_from_name, get_single_tag_entry};
 
 type AggrMessage = (String, (Sender, ResultPayload));
 
-// const N_WINNERS: usize = 3;
+lazy_static! {
+    pub static ref REGISTRY: Registry = Registry::default();
+    pub static ref FINISHED_JOBS: IntCounter =
+        IntCounter::new("finished_jobs", "Finished Jobs").expect("Failed to create finished_jobs");
+}
 
 #[tokio::main]
 async fn main() {
+    if let Err(err) = run().await {
+        eprintln!("{err}");
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> Result<()> {
     dotenv::dotenv().ok();
     // Command line parsing
     let relay_url = std::env::var("RELAY_URL").unwrap_or("ws://127.0.0.1:3033".to_string());
     let supported_version = std::env::var("VERSION").unwrap_or("v0.0.1".to_string());
+
+    // Command line parsing
+    let args: Vec<String> = std::env::args().collect();
+    let config_file_path = match args.len() {
+        1 => {
+            return Err(anyhow!("Missing config file path"));
+        }
+        2 => args[1].clone(),
+        _ => {
+            return Err(anyhow!("Too many arguments"));
+        }
+    };
+
+    // Get configuration from file
+    let config: AggregatorConfig = load_config(config_file_path, "aggregator")?.try_into()?;
 
     // Logger setup
     let subscriber = FmtSubscriber::builder()
         .with_max_level(tracing::Level::DEBUG)
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+
+    // Metrics
+    register_metrics();
+    let socket_addr = config.metrics_socket_addr;
+    let shared_registry = Arc::new(REGISTRY.clone());
+    let (router, listener) = get_metrics_app(shared_registry, socket_addr.as_str()).await;
+    let metrics_handle = tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
 
     // Configure DB from env
     let db_url = std::env::var("MONGO_URL").expect("MONGO_URL is not set");
@@ -104,7 +144,7 @@ async fn main() {
             let n_winners = match job_type {
                 0 => 1,
                 1 => 3,
-                _ => unreachable!()
+                _ => unreachable!(),
             };
 
             if new_payload.version != supported_version {
@@ -123,7 +163,9 @@ async fn main() {
                     job_type,
                 };
                 match collection.insert_one(db_entry, None).await {
-                    Ok(_) => {}
+                    Ok(_) => {
+                        FINISHED_JOBS.inc();
+                    }
                     Err(err) => {
                         // We log and that's it, we keep the entry in book for later inspection
                         tracing::error!("Cannot write finished job to db: {}", err);
@@ -131,7 +173,7 @@ async fn main() {
                 }
                 continue;
             }
-            
+
             match aggr_book.entry(job_id.clone()) {
                 Entry::Occupied(mut entry) => {
                     tracing::debug!("Another result for job {} found", job_id);
@@ -169,6 +211,7 @@ async fn main() {
                         };
                         match collection.insert_one(db_entry, None).await {
                             Ok(_) => {
+                                FINISHED_JOBS.inc();
                                 entry.remove(); // Remove only if we know it's safe in db
                             }
                             Err(err) => {
@@ -202,10 +245,18 @@ async fn main() {
 
     listener_handler.await.unwrap();
     aggregator_handler.await.unwrap();
+    metrics_handle.await.unwrap();
     tracing::info!("Shutting down gracefully");
+    Ok(())
 }
 
 fn get_result_payload(ev: &RelayEvent) -> Result<ResultPayload> {
     let res: ResultPayload = serde_json::from_str(ev.event.content.as_str())?;
     Ok(res)
+}
+
+fn register_metrics() {
+    REGISTRY
+        .register(Box::new(FINISHED_JOBS.clone()))
+        .expect("Cannot register finished_jobs");
 }

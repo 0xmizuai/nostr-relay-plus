@@ -7,3 +7,8 @@ pub mod job_protocol;
 pub mod utils;
 pub mod db;
 pub mod crypto;
+
+// Used internally, not public API.
+#[doc(hidden)]
+#[path = "private/mod.rs"]
+pub mod __private;

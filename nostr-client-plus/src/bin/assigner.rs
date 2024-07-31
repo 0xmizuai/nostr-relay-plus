@@ -1,5 +1,8 @@
 use anyhow::{anyhow, Result};
+use lazy_static::lazy_static;
 use linked_hash_map::LinkedHashMap;
+use nostr_client_plus::__private::config::{load_config, AssignerConfig};
+use nostr_client_plus::__private::metrics::get_metrics_app;
 use nostr_client_plus::client::Client;
 use nostr_client_plus::event::UnsignedEvent;
 use nostr_client_plus::job_protocol::{JobType, Kind};
@@ -10,9 +13,8 @@ use nostr_crypto::sender_signer::SenderSigner;
 use nostr_plus_common::relay_event::RelayEvent;
 use nostr_plus_common::relay_message::RelayMessage;
 use nostr_plus_common::sender::Sender;
-use serde::Deserialize;
+use prometheus::{IntCounter, IntGauge, Registry};
 use std::collections::{BTreeSet, VecDeque};
-use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
@@ -30,8 +32,25 @@ type PubStruct = (Vec<Sender>, RelayEvent); // Struct for passing jobs to assign
 // ToDo: we do not need so many, every few seconds new ones will show up.
 const MAX_WORKERS: usize = 10_000;
 
+lazy_static! {
+    pub static ref REGISTRY: Registry = Registry::default();
+    pub static ref ASSIGNED_JOBS: IntCounter =
+        IntCounter::new("assigned_jobs", "Assigned Jobs").expect("Failed to create assigned_jobs");
+    pub static ref CACHED_JOBS: IntGauge =
+        IntGauge::new("cached_jobs", "Cached Jobs").expect("Failed to create cached_jobs");
+    pub static ref WORKERS_ONLINE: IntGauge =
+        IntGauge::new("workers_online", "Workers Online").expect("Failed to create workers_online");
+}
+
 #[tokio::main]
 async fn main() {
+    if let Err(err) = run().await {
+        eprintln!("{err}");
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> Result<()> {
     // Define needed env variables
     dotenv::dotenv().ok();
     let relay_url = std::env::var("RELAY_URL").unwrap_or("ws://127.0.0.1:3033".to_string());
@@ -41,28 +60,20 @@ async fn main() {
     let args: Vec<String> = std::env::args().collect();
     let config_file_path = match args.len() {
         1 => {
-            eprintln!("Missing config file path");
-            return;
+            return Err(anyhow!("Missing config file path"));
         }
         2 => args[1].clone(),
         _ => {
-            eprintln!("Too many arguments");
-            return;
+            return Err(anyhow!("Too many arguments"));
         }
     };
 
     // Get configuration from file
-    let config = match get_config(config_file_path) {
-        Ok(val) => val,
-        Err(err) => {
-            eprintln!("{err}");
-            return;
-        }
-    };
+    let config: AssignerConfig = load_config(config_file_path, "assigner")?.try_into()?;
+
     // Check whitelist is not empty and then create a set out of it
     if config.whitelist.is_empty() {
-        eprintln!("Whitelist cannot be empty");
-        return;
+        return Err(anyhow!("whitelist is empty"));
     }
     let whitelist: BTreeSet<Sender> = config
         .whitelist
@@ -76,6 +87,15 @@ async fn main() {
         .with_max_level(tracing::Level::DEBUG)
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+
+    // Metrics
+    register_metrics();
+    let socket_addr = config.metrics_socket_addr;
+    let shared_registry = Arc::new(REGISTRY.clone());
+    let (router, listener) = get_metrics_app(shared_registry, socket_addr.as_str()).await;
+    let metrics_handle = tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
 
     // Private key
     let private_key = hex::decode(raw_private_key).unwrap().try_into().unwrap();
@@ -135,6 +155,7 @@ async fn main() {
                         ev.event.content,
                     );
                     client_eh.lock().await.publish(event).await.expect("Failed to publish");
+                    ASSIGNED_JOBS.inc();
                 }
                 else => {
                     tracing::warn!("Unexpected select event");
@@ -157,7 +178,9 @@ async fn main() {
     tracing::info!("Subscribed to NewJob and Alive");
 
     event_handler.await.unwrap();
+    metrics_handle.await.unwrap();
     tracing::info!("Shutting down gracefully");
+    Ok(())
 }
 
 // If Some() is returned, then the event needs to be re-scheduled
@@ -171,7 +194,9 @@ async fn handle_event(
             match ev.event.kind {
                 Kind::ALIVE => {
                     let worker_id = ev.event.sender.clone();
-                    ctx.book.insert(worker_id, ());
+                    if let None = ctx.book.insert(worker_id, ()) {
+                        WORKERS_ONLINE.inc();
+                    }
                     tracing::debug!("HB, now {}", ctx.book.len());
                     // Check if there is a queue to empty
                     while !ctx.queue.is_empty() {
@@ -186,6 +211,7 @@ async fn handle_event(
                             tracing::error!("Queue should not be empty");
                         }
                         let (ev, num_workers) = ctx.queue.pop_front().unwrap();
+                        CACHED_JOBS.dec();
                         let workers = get_workers(&mut ctx.book, num_workers);
                         pub_tx
                             .send((workers, ev))
@@ -196,7 +222,9 @@ async fn handle_event(
                     if ctx.book.len() > MAX_WORKERS {
                         // Remove LRU
                         tracing::debug!("Trimming workers book ({} el)", ctx.book.len());
-                        ctx.book.pop_front();
+                        if ctx.book.pop_front().is_some() {
+                            WORKERS_ONLINE.dec();
+                        }
                     }
                     Ok(())
                 }
@@ -207,6 +235,7 @@ async fn handle_event(
                         tracing::debug!("Not enough workers: {}", ctx.book.len());
                         // not enough workers, queue
                         ctx.queue.push_back((ev, num_workers));
+                        CACHED_JOBS.inc();
                     } else {
                         let workers = get_workers(&mut ctx.book, num_workers);
                         pub_tx
@@ -238,6 +267,7 @@ fn get_workers(book: &mut WorkersBook, num_workers: NumWorkers) -> Vec<Sender> {
         let (w, _) = book.pop_back().expect("There should be enough workers");
         workers.push(w);
     }
+    WORKERS_ONLINE.sub(num_workers as i64);
     workers
 }
 
@@ -261,20 +291,14 @@ struct Context {
     whitelist: BTreeSet<Sender>,
 }
 
-#[derive(Deserialize)]
-struct Config {
-    whitelist: Vec<String>,
-}
-
-fn get_config<P: AsRef<Path>>(path: P) -> Result<Config> {
-    use std::fs;
-
-    let content = fs::read_to_string(path)?;
-    let config: Config = toml::from_str::<toml::Value>(&content)
-        .expect("error parsing content")
-        .get("assigner")
-        .expect("no assigner section")
-        .clone()
-        .try_into()?;
-    Ok(config)
+fn register_metrics() {
+    REGISTRY
+        .register(Box::new(ASSIGNED_JOBS.clone()))
+        .expect("Cannot register assigned_jobs");
+    REGISTRY
+        .register(Box::new(CACHED_JOBS.clone()))
+        .expect("Cannot register cached_jobs");
+    REGISTRY
+        .register(Box::new(WORKERS_ONLINE.clone()))
+        .expect("Cannot register workers_online");
 }
