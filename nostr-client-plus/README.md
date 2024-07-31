@@ -10,6 +10,11 @@ when starting services.
 `Assigner` and `Aggregator` need to start first. Their order is not important but they need to be
 started before the other services.
 
+### Configuration file
+
+Most services require a configuration file in order to start.
+We provide one in `src/bin/config.toml`; check inline comments for more information.
+
 ### Assigner
 
 Assigner accepts one environment variable: `RELAY_URL`.
@@ -23,9 +28,25 @@ Job messages whose senders are not listed won't be assigned and are ignored.
 cargo run --release --package nostr-client-plus --bin assigner -- <config file>
 ```
 
-For example, using the one provided in `src/bin`
+For example, using the one provided in `nostr-client-plus/src/bin`
 ```shell
 cargo run --release --package nostr-client-plus --bin assigner -- nostr-client-plus/src/bin/config.toml
+```
+
+### Aggregator
+
+Aggregator accepts two environment variables: `RELAY_URL` amd `VERSION`.
+`RELAY_URL` is optional and it defaults to `ws://127.0.0.1:3031`.
+`VERSION` is optional and it defaults to `v0.0.1`.
+
+
+```shell
+cargo run --release --package nostr-client-plus --bin aggregator -- <config file>
+```
+
+For example, using the one provided in `src/bin`
+```shell
+cargo run --release --package nostr-client-plus --bin aggregator -- nostr-client-plus/src/bin/config.toml
 ```
 
 ### Publisher
