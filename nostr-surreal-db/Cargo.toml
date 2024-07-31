@@ -26,7 +26,7 @@ chrono = "0.4.23"
 
 nostr-crypto = { workspace = true }
 nostr-plus-common = { workspace = true }
-surrealdb = { version = "1.3" }
+surrealdb = { version = "1.3", features = ["rustls"]}
 
 [features]
 default = []

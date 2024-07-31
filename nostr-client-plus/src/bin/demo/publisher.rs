@@ -1,7 +1,5 @@
-use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::SystemTime;
 use serde_json::json;
 use tokio::sync::Mutex;
 use tracing_subscriber::FmtSubscriber;
@@ -13,7 +11,9 @@ use nostr_crypto::eoa_signer::EoaSigner;
 use nostr_crypto::sender_signer::SenderSigner;
 use nostr_plus_common::relay_message::RelayMessage;
 
-mod common;
+#[path = "../utils.rs"]
+mod utils;
+use utils::{get_mins_before_now_timestamp, get_single_tag_entry};
 
 type PublisherEv = (String, Vec<String>);
 
@@ -40,11 +40,11 @@ async fn main() {
      */
     let subscription_id = "ae4788ade947b42bb8b0d89c9fb3c129c10be87043c32190a96daa9e822a9bf6"; // Subscription_id used for accepting JobBooking events
     let (pub_tx, mut pub_rx) = tokio::sync::mpsc::channel::<PublisherEv>(1);
-    let publisher_handle = tokio::spawn(async move {
+    let _publisher_handle = tokio::spawn(async move {
         tracing::info!("Publisher task started");
 
-        while let Some((content, winners)) = pub_rx.recv().await {
-            let timestamp = common::get_mins_before_now_timestamp(0);
+        while let Some((content, _winners)) = pub_rx.recv().await {
+            let timestamp = get_mins_before_now_timestamp(0);
 
             // Create JobPost (kind == 6_000)
             let event = UnsignedEvent::new(
@@ -103,7 +103,7 @@ async fn main() {
                         // Create JobAssigned (kind == 6_002)
                         let event = UnsignedEvent::new(
                             client_clone.lock().await.sender(),
-                            common::get_mins_before_now_timestamp(0),
+                            get_mins_before_now_timestamp(0),
                             6_002,
                             vec![
                                 vec!["e".to_string(), hex::encode(job_id)],
@@ -130,27 +130,6 @@ async fn main() {
     pub_tx.send(("Job 1".to_string(), vec![])).await.unwrap();
 
     listener_handle.await.unwrap();
-}
-
-/// Get value for a single letter tag. Error if more than one.
-fn get_single_tag_entry(tag: char, tags: &Vec<Vec<String>>) -> Result<Option<String>> {
-    let mut found = false;
-    let match_tag = String::from(tag);
-    let mut result: Option<String> = None;
-
-    for entry in tags {
-        if entry.len() < 2 {
-            return Err(anyhow!("Malformed tags"));
-        }
-        if match_tag == entry[0] {
-            if found == true {
-                return Err(anyhow!("Non unique tag"));
-            }
-            result = Some(entry[1].to_string());
-            found = true;
-        }
-    }
-    Ok(result)
 }
 
 #[cfg(test)]

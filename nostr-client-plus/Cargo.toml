@@ -4,32 +4,59 @@ version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "publisher"
+name = "demo-publisher"
 path = "src/bin/demo/publisher.rs"
 test = false
 
 [[bin]]
-name = "worker"
+name = "demo-worker"
 path = "src/bin/demo/worker.rs"
 test = false
 
+[[bin]]
+name = "assigner"
+path = "src/bin/assigner.rs"
+test = true
+
+[[bin]]
+name = "publisher"
+path = "src/bin/publisher.rs"
+test = true
+
+[[bin]]
+name = "aggregator"
+path = "src/bin/aggregator.rs"
+test = true
+
+[[bin]]
+name = "worker"
+path = "src/bin/worker.rs"
+test = true
+
 [dependencies]
+tokio-tungstenite = { version = "0.23.0", features=["native-tls"] }
+
 alloy-primitives = { workspace = true }
 anyhow = { workspace = true }
 url = "2.5.0"
 tokio = {  workspace = true }
-tokio-tungstenite = "0.23.0"
+futures = { workspace = true }
 futures-util = "0.3.30"
 hex = { workspace = true }
 k256 = { workspace = true }
+linked-hash-map = "0.5.6"
+mongodb = "2.8.2"
 nostr-crypto = { workspace = true }
 nostr-plus-common = { workspace = true }
-nostr-surreal-db = { workspace = true }
 rand = { workspace = true }
 serde_json = { workspace = true }
 serde = { workspace = true }
+strum = "0.26.3"
+strum_macros = "0.26.4"
+toml = "0.8.16"
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+dotenv="*"
 
 [dev-dependencies]
 tokio = { version = "1.38.0", features = ["full", "test-util"] }

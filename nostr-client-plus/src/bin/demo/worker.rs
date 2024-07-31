@@ -10,7 +10,8 @@ use nostr_crypto::eoa_signer::EoaSigner;
 use nostr_crypto::sender_signer::SenderSigner;
 use nostr_plus_common::relay_message::RelayMessage;
 
-mod common;
+#[path = "../utils.rs"]
+mod utils;
 
 #[tokio::main]
 async fn main() {
@@ -23,8 +24,8 @@ async fn main() {
     }
 
     // Create a timestamp corresponding to 2 mins before "now", used for filtering events
-    let filter_timestamp = common::get_mins_before_now_timestamp(2);
-    let now_timestamp = common::get_mins_before_now_timestamp(0);
+    let filter_timestamp = utils::get_mins_before_now_timestamp(2);
+    let now_timestamp = utils::get_mins_before_now_timestamp(0);
 
     // Use static subscription ids
     let sub_id_6000 = "ae4788ade0000000000000000000000000000000000000000000000000000000";

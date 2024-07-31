@@ -8,7 +8,7 @@ use nostr_crypto::signer::Verifier;
 
 use crate::types::Bytes32;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Sender {
     SchnorrPubKey(Bytes32),
     EoaAddress(Address),

@@ -1,0 +1,5 @@
+procs:
+  aggregator:
+    shell: while true; do cargo run --release --package nostr-client-plus --bin aggregator;  done
+  assigner:
+    shell: while true; do cargo run --release --package nostr-client-plus --bin assigner -- ./nostr-client-plus/src/bin/config.toml; done
