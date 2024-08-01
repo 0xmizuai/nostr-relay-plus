@@ -13,8 +13,10 @@ use nostr_plus_common::types::{Bytes32, SubscriptionId};
 use std::collections::HashMap;
 use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
-use tokio::time::{timeout, Duration};
+use tokio::time::{sleep, timeout, Duration};
 use tokio_tungstenite::tungstenite::Message;
+
+const RETRIES: u16 = 60; // WS reconnect attempts
 
 pub struct Client {
     signer: SenderSigner,
@@ -62,6 +64,8 @@ impl Client {
             // Keep track of ack requests
             let mut ack_table: HashMap<Bytes32, oneshot::Sender<RelayOk>> = HashMap::new();
 
+            let mut need_reconnect = false;
+
             loop {
                 tokio::select! {
                     maybe_ws_msg = basic_ws.read_msg() => {
@@ -77,7 +81,7 @@ impl Client {
                             }
                             None => {
                                 eprintln!("Client websocket probably closed");
-                                break; // ToDo: do something
+                                need_reconnect = true;
                             }
                         }
                     }
@@ -86,16 +90,16 @@ impl Client {
                             Some(message) => match message {
                                 ClientCommand::Req(req) => {
                                     if basic_ws.send_msg(Message::from(req.to_string())).await.is_err() {
-                                        eprintln!("Req: websocket error"); // ToDo: do something better
-                                        break;
+                                        eprintln!("Req: websocket error");
+                                        need_reconnect = true;
                                     }
                                 }
                                 ClientCommand::Event((event, tx)) => {
                                     // Add request to ack table
                                     let _ = &ack_table.insert(event.id(), tx); // ToDo: handle existing entries
                                     if basic_ws.send_msg(Message::from(event.to_string())).await.is_err() {
-                                        eprintln!("Event: websocket error"); // ToDo: do something better
-                                        break;
+                                        eprintln!("Event: websocket error");
+                                        need_reconnect = true;
                                     }
                                 }
                                 ClientCommand::Ack(ok_msg) => {
@@ -105,16 +109,39 @@ impl Client {
                                 }
                                 ClientCommand::Close(close_msg) => {
                                     if basic_ws.send_msg(Message::from(close_msg.to_string())).await.is_err() {
-                                        eprintln!("Close subscription: websocket error"); // ToDo: do something better
-                                        break;
+                                        eprintln!("Close subscription: websocket error");
+                                        need_reconnect = true;
                                     }
                                 }
                             }
-                        None => eprintln!("Client unrecoverable error: broken internal channel"), // toDo: try to recover
+                            None => {
+                                eprintln!("Client unrecoverable error: broken internal channel"); // ToDo: try to recover
+                                break;
+                            }
                         }
                     }
                 }
+                if need_reconnect {
+                    let mut counter = 0;
+                    while counter < RETRIES {
+                        eprintln!("Trying to reconnect: attempt {}", counter);
+                        match basic_ws.reconnect().await {
+                            Ok(_) => {
+                                need_reconnect = false;
+                                break;
+                            }
+                            Err(_) => {}
+                        }
+                        counter += 1;
+                        sleep(Duration::from_secs(2)).await
+                    }
+                    // if still not reconnected, break
+                    if need_reconnect {
+                        break;
+                    }
+                }
             }
+            // ToDo: before leaving the task, notify the user somehow that the client is unusable
         });
 
         self.int_tx = Some(int_tx);
