@@ -1,9 +1,9 @@
+use crate::basic_ws::BasicWS;
 use crate::client_command::ClientCommand;
 use crate::close::Close;
 use crate::event::UnsignedEvent;
 use crate::request::Request;
 use anyhow::{anyhow, Result};
-use futures_util::{SinkExt, StreamExt};
 use nostr_crypto::sender_signer::SenderSigner;
 use nostr_crypto::signer::Signer;
 use nostr_plus_common::relay_message::RelayMessage;
@@ -14,7 +14,6 @@ use std::collections::HashMap;
 use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
 use tokio::time::{timeout, Duration};
-use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 
 pub struct Client {
@@ -54,13 +53,8 @@ impl Client {
             UnboundedReceiver<ClientCommand>,
         ) = mpsc::unbounded_channel();
 
-        let (socket, resp) = match connect_async(url).await {
-            Ok((socket, response)) => (socket, response),
-            Err(err) => return Err(anyhow!("Cannot connect to {}: {}", url, err)),
-        };
-        println!("Connection established: {:?}", resp);
-
-        let (mut ws_write, mut ws_read) = socket.split();
+        // Create WS connection
+        let mut basic_ws = BasicWS::new(url).await?;
 
         // Spawn listener
         let int_tx_clone = int_tx.clone();
@@ -70,7 +64,7 @@ impl Client {
 
             loop {
                 tokio::select! {
-                    maybe_ws_msg = ws_read.next() => {
+                    maybe_ws_msg = basic_ws.read_msg() => {
                         match maybe_ws_msg {
                             Some(msg) => match msg {
                                 Ok(Message::Text(message)) => {
@@ -91,7 +85,7 @@ impl Client {
                         match maybe_int_msg {
                             Some(message) => match message {
                                 ClientCommand::Req(req) => {
-                                    if ws_write.send(Message::from(req.to_string())).await.is_err() {
+                                    if basic_ws.send_msg(Message::from(req.to_string())).await.is_err() {
                                         eprintln!("Req: websocket error"); // ToDo: do something better
                                         break;
                                     }
@@ -99,7 +93,7 @@ impl Client {
                                 ClientCommand::Event((event, tx)) => {
                                     // Add request to ack table
                                     let _ = &ack_table.insert(event.id(), tx); // ToDo: handle existing entries
-                                    if ws_write.send(Message::from(event.to_string())).await.is_err() {
+                                    if basic_ws.send_msg(Message::from(event.to_string())).await.is_err() {
                                         eprintln!("Event: websocket error"); // ToDo: do something better
                                         break;
                                     }
@@ -110,7 +104,7 @@ impl Client {
                                     }
                                 }
                                 ClientCommand::Close(close_msg) => {
-                                    if ws_write.send(Message::from(close_msg.to_string())).await.is_err() {
+                                    if basic_ws.send_msg(Message::from(close_msg.to_string())).await.is_err() {
                                         eprintln!("Close subscription: websocket error"); // ToDo: do something better
                                         break;
                                     }

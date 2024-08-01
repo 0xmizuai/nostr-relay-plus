@@ -12,3 +12,4 @@ pub mod crypto;
 #[doc(hidden)]
 #[path = "private/mod.rs"]
 pub mod __private;
+pub mod basic_ws;
