@@ -7,6 +7,7 @@ use serde_json::json;
 use std::fmt;
 use std::fmt::Formatter;
 
+#[derive(Clone)]
 pub struct UnsignedEvent(Event);
 
 impl UnsignedEvent {
@@ -43,7 +44,7 @@ impl UnsignedEvent {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Event(EventOnWire);
 
 impl Event {

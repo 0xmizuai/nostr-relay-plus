@@ -16,8 +16,10 @@ use nostr_plus_common::sender::Sender;
 use prometheus::{IntCounter, IntGauge, Registry};
 use std::collections::{BTreeSet, VecDeque};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
+use tokio::time::sleep;
 use tracing_subscriber::FmtSubscriber;
 
 mod utils;
@@ -135,6 +137,7 @@ async fn run() -> Result<()> {
         loop {
             tokio::select! {
                 Some(msg) = relay_channel.recv() => {
+                    tracing::debug!("Select from client ws relay");
                     if let Err(err) = handle_event(msg, &mut context, &pub_tx).await {
                         tracing::error!("{err}");
                     }
@@ -154,8 +157,34 @@ async fn run() -> Result<()> {
                         tags,
                         ev.event.content,
                     );
-                    client_eh.lock().await.publish(event).await.expect("Failed to publish");
-                    ASSIGNED_JOBS.inc();
+
+                    // Try to publish
+                    let event_clone = event.clone(); // clone in case we need the retry task;
+                    let client_clone = client_eh.clone();
+                    if client_eh.lock().await.publish(event).await.is_err() {
+                        // Spawn a task to retry a few times in case ACK did not arrive on time
+                        // or client reconnecting.
+                        let _ = tokio::spawn(async move {
+                            let mut counter = 0;
+                            while counter < 5 {
+                                match client_clone.lock().await.publish(event_clone.clone()).await {
+                                    Ok(_) => break,
+                                    Err(_) => {
+                                        tracing::warn!("Publishing {} failed, attempt {}\nRetrying", hex::encode(event_clone.id()), counter);
+                                        counter += 1;
+                                        sleep(Duration::from_secs(2)).await;
+                                    },
+                                }
+                            }
+                            if counter < 5 {
+                                ASSIGNED_JOBS.inc();
+                            } else {
+                                tracing::error!("Could not assign event {}", hex::encode(event_clone.id()));
+                            }
+                        });
+                    } else {
+                        ASSIGNED_JOBS.inc();
+                    }
                 }
                 else => {
                     tracing::warn!("Unexpected select event");
@@ -177,9 +206,11 @@ async fn run() -> Result<()> {
     client.lock().await.subscribe(req, Some(0)).await.unwrap();
     tracing::info!("Subscribed to NewJob and Alive");
 
-    event_handler.await.unwrap();
-    metrics_handle.await.unwrap();
-    tracing::info!("Shutting down gracefully");
+    tokio::select! {
+        _ = event_handler => tracing::warn!("event handler task has stopped"),
+        _ = metrics_handle => tracing::warn!("metrics task has stopped"),
+    }
+    tracing::info!("Shutting down (almost) gracefully");
     Ok(())
 }
 

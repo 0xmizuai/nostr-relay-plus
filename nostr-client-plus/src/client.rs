@@ -207,7 +207,7 @@ impl Client {
                 int_tx.send(ClientCommand::Event((event, tx)))?;
 
                 // Wait for ACK with timeout
-                match timeout(Duration::from_secs(20), rx).await {
+                match timeout(Duration::from_secs(10), rx).await {
                     Ok(Ok(msg)) => {
                         if msg.accepted {
                             Ok(())
