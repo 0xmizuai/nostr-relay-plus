@@ -6,7 +6,7 @@ use std::fmt::Formatter;
 
 #[derive(Debug)]
 pub struct Close {
-    subscription_id: String,
+    pub subscription_id: String,
 }
 
 impl Close {

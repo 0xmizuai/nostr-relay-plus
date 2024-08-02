@@ -63,6 +63,8 @@ impl Client {
         tokio::spawn(async move {
             // Keep track of ack requests
             let mut ack_table: HashMap<Bytes32, oneshot::Sender<RelayOk>> = HashMap::new();
+            // Keep track of subscriptions
+            let mut subscriptions: HashMap<SubscriptionId, Request> = HashMap::new();
 
             let mut need_reconnect = false;
 
@@ -89,7 +91,10 @@ impl Client {
                         match maybe_int_msg {
                             Some(message) => match message {
                                 ClientCommand::Req(req) => {
-                                    if basic_ws.send_msg(Message::from(req.to_string())).await.is_err() {
+                                    tracing::debug!("Subscription: {:?}", req);
+                                    let req_str = req.to_string();
+                                    subscriptions.insert(req.subscription_id.clone(), req);
+                                    if basic_ws.send_msg(Message::from(req_str)).await.is_err() {
                                         eprintln!("Req: websocket error");
                                         need_reconnect = true;
                                     }
@@ -111,6 +116,8 @@ impl Client {
                                     if basic_ws.send_msg(Message::from(close_msg.to_string())).await.is_err() {
                                         eprintln!("Close subscription: websocket error");
                                         need_reconnect = true;
+                                    } else {
+                                        subscriptions.remove(&close_msg.subscription_id);
                                     }
                                 }
                             }
@@ -136,8 +143,15 @@ impl Client {
                         sleep(Duration::from_secs(2)).await
                     }
                     // if still not reconnected, break
+                    // otherwise resubscribe to everything
                     if need_reconnect {
                         break;
+                    } else {
+                        for (_, req) in &subscriptions {
+                            if let Err(err) = int_tx_clone.send(ClientCommand::Req(req.clone())) {
+                                tracing::error!("While resubscribing: {err}");
+                            }
+                        }
                     }
                 }
             }
@@ -218,8 +232,8 @@ impl Client {
 
     pub async fn subscribe(&self, req: Request) -> Result<()> {
         match &self.int_tx {
-            Some(sender) => {
-                sender.send(ClientCommand::Req(req))?;
+            Some(int_tx) => {
+                int_tx.send(ClientCommand::Req(req))?;
             }
             None => return Err(anyhow!("Subscribe: missing websocket")),
         }
@@ -229,8 +243,8 @@ impl Client {
     pub async fn close_subscription(&self, sub_id: SubscriptionId) -> Result<()> {
         let close_msg = Close::new(sub_id);
         match &self.int_tx {
-            Some(sender) => {
-                sender.send(ClientCommand::Close(close_msg))?;
+            Some(int_tx) => {
+                int_tx.send(ClientCommand::Close(close_msg))?;
             }
             None => return Err(anyhow!("Close subscription: missing websocket")),
         }
