@@ -77,7 +77,7 @@ async fn main() {
     };
     let req = Request::new(sub_id_6000.to_string(), vec![filter]);
     println!("REQ subscription (kind = 6000)");
-    client.lock().await.subscribe(req).await.unwrap();
+    client.lock().await.subscribe(req, None).await.unwrap();
 
     // Register for jobs assigned to us
     let client_id = hex::encode(client.lock().await.sender().to_bytes());
@@ -91,7 +91,7 @@ async fn main() {
     };
     let req = Request::new(sub_id_6002.to_string(), vec![filter]);
     println!("REQ subscription (kind = 6002): checking jobs for {}", client_id);
-    client.lock().await.subscribe(req).await.unwrap();
+    client.lock().await.subscribe(req, None).await.unwrap();
     println!("All subscribed");
 
     listener_handle.await.unwrap();

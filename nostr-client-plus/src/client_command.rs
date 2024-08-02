@@ -6,7 +6,7 @@ use crate::close::Close;
 
 #[derive(Debug)]
 pub enum ClientCommand {
-    Req(Request),
+    Req((Request, Option<u64>)),
     Event((Event, Sender<RelayOk>)),
     Ack(RelayOk),
     Close(Close),

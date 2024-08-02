@@ -1,8 +1,9 @@
+use crate::basic_ws::BasicWS;
 use crate::client_command::ClientCommand;
+use crate::close::Close;
 use crate::event::UnsignedEvent;
 use crate::request::Request;
 use anyhow::{anyhow, Result};
-use futures_util::{SinkExt, StreamExt};
 use nostr_crypto::sender_signer::SenderSigner;
 use nostr_crypto::signer::Signer;
 use nostr_plus_common::relay_message::RelayMessage;
@@ -10,22 +11,25 @@ use nostr_plus_common::relay_ok::RelayOk;
 use nostr_plus_common::sender::Sender as NostrSender;
 use nostr_plus_common::types::{Bytes32, SubscriptionId};
 use std::collections::HashMap;
-use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
-use tokio::time::{timeout, Duration};
-use tokio_tungstenite::connect_async;
+use tokio::time::{sleep, timeout, Duration};
 use tokio_tungstenite::tungstenite::Message;
-use crate::close::Close;
+
+const RETRIES: u16 = 60; // WS reconnect attempts
 
 pub struct Client {
     signer: SenderSigner,
-    tx: Option<Sender<ClientCommand>>,
+    int_tx: Option<UnboundedSender<ClientCommand>>,
     // ToDo: keep track of subscriptions
 }
 
 impl Client {
     pub fn new(signer: SenderSigner) -> Self {
-        Self { signer, tx: None }
+        Self {
+            signer,
+            int_tx: None,
+        }
     }
 
     pub async fn connect(&mut self, url: &str) -> Result<()> {
@@ -33,123 +37,181 @@ impl Client {
     }
 
     pub async fn connect_with_channel(&mut self, url: &str) -> Result<Receiver<RelayMessage>> {
-        let (sender, receiver) = mpsc::channel(10);
-        self._connect(url, Some(sender)).await.map(|_| receiver)
+        let (ext_tx, ext_rx) = mpsc::channel(10);
+        self._connect(url, Some(ext_tx)).await.map(|_| ext_rx)
     }
 
     pub async fn _connect(&mut self, url: &str, sink: Option<Sender<RelayMessage>>) -> Result<()> {
         // If already connected, ignore. ToDo: handle this better
-        if self.tx.is_some() {
+        if self.int_tx.is_some() {
             return Err(anyhow!("Already connected"));
         }
 
-        let (sender, mut receiver): (Sender<ClientCommand>, Receiver<ClientCommand>) =
-            mpsc::channel(32);
+        // Warning: both sides of this channel are used in a tokio select. This needs to be unbounded because
+        // we cannot afford to wait on it in one of the two branches, otherwise we could block
+        // indefinitely
+        let (int_tx, mut int_rx): (
+            UnboundedSender<ClientCommand>,
+            UnboundedReceiver<ClientCommand>,
+        ) = mpsc::unbounded_channel();
 
-        let (socket, resp) = match connect_async(url).await {
-            Ok((socket, response)) => (socket, response),
-            Err(err) => return Err(anyhow!("Cannot connect to {}: {}", url, err)),
-        };
-        println!("Connection established: {:?}", resp);
+        // Create WS connection
+        let mut basic_ws = BasicWS::new(url).await?;
 
-        let (mut write, mut read) = socket.split();
-
-        let sender_clone = sender.clone();
         // Spawn listener
-        tokio::spawn(async move {
-            while let Some(msg) = read.next().await {
-                match msg {
-                    Ok(Message::Text(message)) => {
-                        Self::handle_incoming_message(message, &sender_clone, sink.as_ref()).await
-                    }
-                    Ok(Message::Ping(_)) => {} // tungstenite handles Pong already
-                    Ok(Message::Close(c)) => println!("Server closed connection: {:?}", c), // ToDo: do something
-                    Ok(_) => println!("Unsupported message"),
-                    Err(err) => println!("Do something about {}", err), // ToDo: handle error
-                }
-            }
-            eprintln!("Error in listener while reading form channel: closing");
-        });
-
-        // Spawn sender, reading commands from internal channel
+        let int_tx_clone = int_tx.clone();
         tokio::spawn(async move {
             // Keep track of ack requests
             let mut ack_table: HashMap<Bytes32, oneshot::Sender<RelayOk>> = HashMap::new();
+            // Keep track of subscriptions
+            let mut subscriptions: HashMap<SubscriptionId, (Request, Option<u64>)> = HashMap::new();
 
-            while let Some(message) = receiver.recv().await {
-                match message {
-                    ClientCommand::Req(req) => {
-                        if write.send(Message::from(req.to_string())).await.is_err() {
-                            eprintln!("Req: websocket error"); // ToDo: do something better
-                            break;
+            let mut need_reconnect = false;
+
+            loop {
+                tokio::select! {
+                    maybe_ws_msg = basic_ws.read_msg() => {
+                        match maybe_ws_msg {
+                            Some(msg) => match msg {
+                                Ok(Message::Text(message)) => {
+                                    Self::handle_incoming_message(message, &int_tx_clone, sink.as_ref()).await
+                                }
+                                Ok(Message::Ping(_)) => {} // tungstenite handles Pong already
+                                Ok(Message::Close(c)) => tracing::warn!("Server closed connection: {:?}", c), // ToDo: do something
+                                Ok(_) => tracing::warn!("Unsupported message"),
+                                Err(err) => tracing::error!("Do something about {}", err), // ToDo: handle error
+                            }
+                            None => {
+                                tracing::debug!("Client websocket probably closed");
+                                need_reconnect = true;
+                            }
                         }
                     }
-                    ClientCommand::Event((event, tx)) => {
-                        // Add request to ack table
-                        let _ = &ack_table.insert(event.id(), tx); // ToDo: handle existing entries
-                        if write.send(Message::from(event.to_string())).await.is_err() {
-                            eprintln!("Event: websocket error"); // ToDo: do something better
-                            break;
+                    maybe_int_msg = int_rx.recv() => {
+                        match maybe_int_msg {
+                            Some(message) => match message {
+                                ClientCommand::Req((req, since_offset)) => {
+                                    tracing::debug!("Subscription: {:?}", req);
+                                    let req_str = req.to_string();
+                                    subscriptions.insert(req.subscription_id.clone(), (req, since_offset));
+                                    if basic_ws.send_msg(Message::from(req_str)).await.is_err() {
+                                        tracing::debug!("Req: websocket error");
+                                        need_reconnect = true;
+                                    }
+                                }
+                                ClientCommand::Event((event, tx)) => {
+                                    // Add request to ack table
+                                    let _ = &ack_table.insert(event.id(), tx); // ToDo: handle existing entries
+                                    if basic_ws.send_msg(Message::from(event.to_string())).await.is_err() {
+                                        tracing::debug!("Event: websocket error");
+                                        need_reconnect = true;
+                                    }
+                                }
+                                ClientCommand::Ack(ok_msg) => {
+                                    if let Some(tx) = ack_table.remove(&ok_msg.event_id) {
+                                        let _ = tx.send(ok_msg);
+                                    }
+                                }
+                                ClientCommand::Close(close_msg) => {
+                                    if basic_ws.send_msg(Message::from(close_msg.to_string())).await.is_err() {
+                                        tracing::debug!("Close subscription: websocket error");
+                                        need_reconnect = true;
+                                    } else {
+                                        subscriptions.remove(&close_msg.subscription_id);
+                                    }
+                                }
+                            }
+                            None => {
+                                tracing::debug!("Client unrecoverable error: broken internal channel"); // ToDo: try to recover
+                                break;
+                            }
                         }
                     }
-                    ClientCommand::Ack(ok_msg) => {
-                        if let Some(tx) = ack_table.remove(&ok_msg.event_id) {
-                            let _ = tx.send(ok_msg);
+                }
+                if need_reconnect {
+                    let mut counter = 0;
+                    while counter < RETRIES {
+                        tracing::warn!("Trying to reconnect: attempt {}", counter);
+                        match basic_ws.reconnect().await {
+                            Ok(_) => {
+                                need_reconnect = false;
+                                break;
+                            }
+                            Err(_) => {}
                         }
+                        counter += 1;
+                        sleep(Duration::from_secs(2)).await
                     }
-                    ClientCommand::Close(close_msg) => {
-                        if write.send(Message::from(close_msg.to_string())).await.is_err() {
-                            eprintln!("Close subscription: websocket error"); // ToDo: do something better
-                            break;
+                    // if still not reconnected, break
+                    // otherwise resubscribe to everything
+                    if need_reconnect {
+                        break;
+                    } else {
+                        let current_time = chrono::Utc::now().timestamp() as u64;
+                        for (_, (ref mut req, since_offset)) in &mut subscriptions {
+                            if let Some(offset) = since_offset {
+                                let timestamp = current_time - *offset;
+                                for filter in &mut req.filters {
+                                    filter.since = Some(timestamp);
+                                }
+                            }
+                            if let Err(err) =
+                                int_tx_clone.send(ClientCommand::Req((req.clone(), *since_offset)))
+                            {
+                                tracing::error!("While resubscribing: {err}");
+                            }
                         }
                     }
                 }
             }
+            if let Some(sink) = sink {
+                if sink.send(RelayMessage::Disconnected).await.is_err() {
+                    tracing::error!("Cannot send Disconnected message to user");
+                }
+            }
         });
 
-        self.tx = Some(sender);
+        self.int_tx = Some(int_tx);
 
         Ok(())
     }
 
     async fn handle_incoming_message(
         msg: String,
-        tx: &Sender<ClientCommand>,
+        tx: &UnboundedSender<ClientCommand>,
         sink: Option<&Sender<RelayMessage>>,
     ) {
         match serde_json::from_str::<RelayMessage>(&msg) {
             Ok(incoming) => match incoming {
                 RelayMessage::Ok(ok_msg) => {
-                    println!("ACK: {}", serde_json::to_string(&ok_msg).unwrap());
-                    let _ = tx.send(ClientCommand::Ack(ok_msg)).await;
+                    tracing::debug!("ACK: {}", serde_json::to_string(&ok_msg).unwrap());
+                    let _ = tx.send(ClientCommand::Ack(ok_msg));
                 }
-                relay_msg => {
-                    match sink {
-                        None => println!("Unhandled: {:?}", msg),
-                        Some(sender) => {
-                            if let Err(e) = sender.send(relay_msg).await {
-                                eprintln!("{}", e);
-                            }
+                relay_msg => match sink {
+                    None => tracing::warn!("Unhandled: {:?}", msg),
+                    Some(sender) => {
+                        if let Err(e) = sender.send(relay_msg).await {
+                            tracing::error!("{}", e);
                         }
                     }
-                }
+                },
             },
-            Err(err) => eprintln!("ERROR ({}) with msg: {}", err, msg),
+            Err(err) => tracing::error!("ERROR ({}) with msg: {}", err, msg),
         }
     }
 
     pub async fn publish(&self, event: UnsignedEvent) -> Result<()> {
-        match &self.tx {
-            Some(sender) => {
+        match &self.int_tx {
+            Some(int_tx) => {
                 let event = event.sign(&self.signer)?;
 
                 // Prepare ACK channel
                 let (tx, rx) = oneshot::channel::<RelayOk>();
 
-                sender.send(ClientCommand::Event((event, tx))).await?;
+                int_tx.send(ClientCommand::Event((event, tx)))?;
 
                 // Wait for ACK with timeout
-                match timeout(Duration::from_secs(20), rx).await {
+                match timeout(Duration::from_secs(10), rx).await {
                     Ok(Ok(msg)) => {
                         if msg.accepted {
                             Ok(())
@@ -181,10 +243,12 @@ impl Client {
         }
     }
 
-    pub async fn subscribe(&self, req: Request) -> Result<()> {
-        match &self.tx {
-            Some(sender) => {
-                sender.send(ClientCommand::Req(req)).await?;
+    // ToDo: reconnect_since is a terrible hack to let users specify an offset from "now"
+    //  to use in the `since` field when reconnecting. If None, use the old `since` value.
+    pub async fn subscribe(&self, req: Request, reconnect_since: Option<u64>) -> Result<()> {
+        match &self.int_tx {
+            Some(int_tx) => {
+                int_tx.send(ClientCommand::Req((req, reconnect_since)))?;
             }
             None => return Err(anyhow!("Subscribe: missing websocket")),
         }
@@ -193,9 +257,9 @@ impl Client {
 
     pub async fn close_subscription(&self, sub_id: SubscriptionId) -> Result<()> {
         let close_msg = Close::new(sub_id);
-        match &self.tx {
-            Some(sender) => {
-                sender.send(ClientCommand::Close(close_msg)).await?;
+        match &self.int_tx {
+            Some(int_tx) => {
+                int_tx.send(ClientCommand::Close(close_msg))?;
             }
             None => return Err(anyhow!("Close subscription: missing websocket")),
         }

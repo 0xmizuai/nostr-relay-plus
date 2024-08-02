@@ -98,7 +98,6 @@ pub async fn handle_websocket_connection(
             },
             Some(outgoing) = outgoing_receiver.recv() => {
                 let msg = wrap_ws_message(outgoing);
-                println!("SENDING BACK -> {:?}", msg);
                 let _ = ws_sender.send(msg).await;
             }
         }

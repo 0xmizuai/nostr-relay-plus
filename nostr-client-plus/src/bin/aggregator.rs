@@ -62,7 +62,7 @@ async fn run() -> Result<()> {
 
     // Logger setup
     let subscriber = FmtSubscriber::builder()
-        .with_max_level(tracing::Level::DEBUG)
+        .with_max_level(tracing::Level::INFO)
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
@@ -238,7 +238,7 @@ async fn run() -> Result<()> {
     };
     let req = Request::new(sub_id.to_string(), vec![filter]);
     client
-        .subscribe(req)
+        .subscribe(req, Some(120)) // in case of reconnect, get messages 2 mins old
         .await
         .expect("Cannot subscribe for Results");
     tracing::info!("Subscribed to Result");

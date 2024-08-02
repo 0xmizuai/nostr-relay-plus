@@ -4,7 +4,7 @@ use serde::{Serialize, Serializer};
 use std::fmt;
 use std::fmt::Formatter;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Request {
     pub subscription_id: String, // Make it Option so we can generate one if None
     pub filters: Vec<FilterOnWire>,

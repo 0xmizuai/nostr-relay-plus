@@ -18,14 +18,11 @@ impl LocalState {
 
 
     pub async fn handle_incoming_message(&mut self, incoming_message: IncomingMessage) -> Result<()> {
-        println!("Handling incoming message");
         match incoming_message {
             IncomingMessage::Event(event) => {
                 let event_id_hex = hex::encode(event.id);
-                println!("Sending reply back for {}", event_id_hex);
                 let reply = match self.handle_event(event).await {
                     Ok(event) => {
-                        println!("Sending broadcast for {}", event_id_hex);
                         if self.auth_on_send_global_broadcast_event(&event) {
                             if self.global_state.global_events_pub_sender.send(event).is_err() {
                                 // ToDo: if send is broken is logging enough?
@@ -52,7 +49,6 @@ impl LocalState {
                         .collect::<Vec<_>>()
                 } else { Vec::new() };
 
-                tracing::warn!("#### I have {} messages stored for this REQ", messages.len());
                 for msg in messages {
                     self.outgoing_sender.send(msg).await?;
                 }
@@ -60,8 +56,6 @@ impl LocalState {
                 self.subscribe(sub)?;
             },
             IncomingMessage::Auth(auth) => {
-                println!("{:?}", auth);
-
                 // 1. validate the challenge
                 // let event: Event = auth.try_into()?;
                 // let content = hex::decode(event.content)?;
@@ -70,17 +64,13 @@ impl LocalState {
                 tracing::info!("Cancelling subscription {}", sub_id);
                 self.unsubscribe(sub_id.as_str());
             },
-            _ => { 
-                println!("{:?}", incoming_message); 
-            }
+            _ => {}
         }
         Ok(())
     }
 
     async fn handle_event(&mut self, event: EventOnWire) -> Result<Event> {
-        println!("Processing Event {}", hex::encode(event.id));
         event.verify()?;
-        eprintln!("verify success");
         let e: Event = event.try_into()?;
         e.validate()?; // ToDo: `verify` on EventOnWire or `validate` on Event?
 

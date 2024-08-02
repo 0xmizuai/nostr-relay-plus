@@ -46,7 +46,7 @@ async fn e2e() {
         "ae4788ade947b42bb8b0d89c9fbcc129c10be87043c32190a96daa9e822a9bf6".to_string(),
         vec![filter],
     );
-    client_2.subscribe(req).await.unwrap();
+    client_2.subscribe(req, None).await.unwrap();
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     // Prepare event for Schnorr client and send

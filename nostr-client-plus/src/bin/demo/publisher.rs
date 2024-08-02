@@ -69,7 +69,7 @@ async fn main() {
                 ..Default::default()
             };
             let req = Request::new(subscription_id.to_string(), vec![filter]);
-            client.lock().await.subscribe(req).await.unwrap();
+            client.lock().await.subscribe(req, None).await.unwrap();
         }
         tracing::error!("Publisher error while reading from channel: task has exited");
     });
