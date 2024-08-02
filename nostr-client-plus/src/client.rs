@@ -64,7 +64,7 @@ impl Client {
             // Keep track of ack requests
             let mut ack_table: HashMap<Bytes32, oneshot::Sender<RelayOk>> = HashMap::new();
             // Keep track of subscriptions
-            let mut subscriptions: HashMap<SubscriptionId, Request> = HashMap::new();
+            let mut subscriptions: HashMap<SubscriptionId, (Request, Option<u64>)> = HashMap::new();
 
             let mut need_reconnect = false;
 
@@ -90,10 +90,10 @@ impl Client {
                     maybe_int_msg = int_rx.recv() => {
                         match maybe_int_msg {
                             Some(message) => match message {
-                                ClientCommand::Req(req) => {
+                                ClientCommand::Req((req, since_offset)) => {
                                     tracing::debug!("Subscription: {:?}", req);
                                     let req_str = req.to_string();
-                                    subscriptions.insert(req.subscription_id.clone(), req);
+                                    subscriptions.insert(req.subscription_id.clone(), (req, since_offset));
                                     if basic_ws.send_msg(Message::from(req_str)).await.is_err() {
                                         eprintln!("Req: websocket error");
                                         need_reconnect = true;
@@ -147,8 +147,17 @@ impl Client {
                     if need_reconnect {
                         break;
                     } else {
-                        for (_, req) in &subscriptions {
-                            if let Err(err) = int_tx_clone.send(ClientCommand::Req(req.clone())) {
+                        let current_time = chrono::Utc::now().timestamp() as u64;
+                        for (_, (ref mut req, since_offset)) in &mut subscriptions {
+                            if let Some(offset) = since_offset {
+                                let timestamp = current_time - *offset;
+                                for filter in &mut req.filters {
+                                    filter.since = Some(timestamp);
+                                }
+                            }
+                            if let Err(err) =
+                                int_tx_clone.send(ClientCommand::Req((req.clone(), *since_offset)))
+                            {
                                 tracing::error!("While resubscribing: {err}");
                             }
                         }
@@ -230,10 +239,12 @@ impl Client {
         }
     }
 
-    pub async fn subscribe(&self, req: Request) -> Result<()> {
+    // ToDo: reconnect_since is a terrible hack to let users specify an offset from "now"
+    //  to use in the `since` field when reconnecting. If None, use the old `since` value.
+    pub async fn subscribe(&self, req: Request, reconnect_since: Option<u64>) -> Result<()> {
         match &self.int_tx {
             Some(int_tx) => {
-                int_tx.send(ClientCommand::Req(req))?;
+                int_tx.send(ClientCommand::Req((req, reconnect_since)))?;
             }
             None => return Err(anyhow!("Subscribe: missing websocket")),
         }

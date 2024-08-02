@@ -22,7 +22,6 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true }
-chrono = "0.4.23"
 
 nostr-crypto = { workspace = true }
 nostr-plus-common = { workspace = true }

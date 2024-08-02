@@ -174,7 +174,7 @@ async fn run() -> Result<()> {
         ..Default::default()
     };
     let req = Request::new(sub_id.to_string(), vec![filter]);
-    client.lock().await.subscribe(req).await.unwrap();
+    client.lock().await.subscribe(req, Some(0)).await.unwrap();
     tracing::info!("Subscribed to NewJob and Alive");
 
     event_handler.await.unwrap();
