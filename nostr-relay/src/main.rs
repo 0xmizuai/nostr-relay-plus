@@ -19,7 +19,7 @@ async fn main() -> Result<()> {
 
     let mut builder = env_logger::Builder::from_default_env();
     builder.format_timestamp(None);
-    builder.filter_level(log::LevelFilter::Debug);
+    builder.filter_level(log::LevelFilter::Info);
     builder.try_init()?;
 
     let cors = CorsLayer::very_permissive();
