@@ -77,12 +77,12 @@ impl Client {
                                     Self::handle_incoming_message(message, &int_tx_clone, sink.as_ref()).await
                                 }
                                 Ok(Message::Ping(_)) => {} // tungstenite handles Pong already
-                                Ok(Message::Close(c)) => println!("Server closed connection: {:?}", c), // ToDo: do something
-                                Ok(_) => println!("Unsupported message"),
-                                Err(err) => println!("Do something about {}", err), // ToDo: handle error
+                                Ok(Message::Close(c)) => tracing::warn!("Server closed connection: {:?}", c), // ToDo: do something
+                                Ok(_) => tracing::warn!("Unsupported message"),
+                                Err(err) => tracing::error!("Do something about {}", err), // ToDo: handle error
                             }
                             None => {
-                                eprintln!("Client websocket probably closed");
+                                tracing::debug!("Client websocket probably closed");
                                 need_reconnect = true;
                             }
                         }
@@ -95,7 +95,7 @@ impl Client {
                                     let req_str = req.to_string();
                                     subscriptions.insert(req.subscription_id.clone(), (req, since_offset));
                                     if basic_ws.send_msg(Message::from(req_str)).await.is_err() {
-                                        eprintln!("Req: websocket error");
+                                        tracing::debug!("Req: websocket error");
                                         need_reconnect = true;
                                     }
                                 }
@@ -103,7 +103,7 @@ impl Client {
                                     // Add request to ack table
                                     let _ = &ack_table.insert(event.id(), tx); // ToDo: handle existing entries
                                     if basic_ws.send_msg(Message::from(event.to_string())).await.is_err() {
-                                        eprintln!("Event: websocket error");
+                                        tracing::debug!("Event: websocket error");
                                         need_reconnect = true;
                                     }
                                 }
@@ -114,7 +114,7 @@ impl Client {
                                 }
                                 ClientCommand::Close(close_msg) => {
                                     if basic_ws.send_msg(Message::from(close_msg.to_string())).await.is_err() {
-                                        eprintln!("Close subscription: websocket error");
+                                        tracing::debug!("Close subscription: websocket error");
                                         need_reconnect = true;
                                     } else {
                                         subscriptions.remove(&close_msg.subscription_id);
@@ -122,7 +122,7 @@ impl Client {
                                 }
                             }
                             None => {
-                                eprintln!("Client unrecoverable error: broken internal channel"); // ToDo: try to recover
+                                tracing::debug!("Client unrecoverable error: broken internal channel"); // ToDo: try to recover
                                 break;
                             }
                         }
@@ -131,7 +131,7 @@ impl Client {
                 if need_reconnect {
                     let mut counter = 0;
                     while counter < RETRIES {
-                        eprintln!("Trying to reconnect: attempt {}", counter);
+                        tracing::warn!("Trying to reconnect: attempt {}", counter);
                         match basic_ws.reconnect().await {
                             Ok(_) => {
                                 need_reconnect = false;
@@ -180,19 +180,19 @@ impl Client {
         match serde_json::from_str::<RelayMessage>(&msg) {
             Ok(incoming) => match incoming {
                 RelayMessage::Ok(ok_msg) => {
-                    println!("ACK: {}", serde_json::to_string(&ok_msg).unwrap());
+                    tracing::debug!("ACK: {}", serde_json::to_string(&ok_msg).unwrap());
                     let _ = tx.send(ClientCommand::Ack(ok_msg));
                 }
                 relay_msg => match sink {
-                    None => println!("Unhandled: {:?}", msg),
+                    None => tracing::warn!("Unhandled: {:?}", msg),
                     Some(sender) => {
                         if let Err(e) = sender.send(relay_msg).await {
-                            eprintln!("{}", e);
+                            tracing::error!("{}", e);
                         }
                     }
                 },
             },
-            Err(err) => eprintln!("ERROR ({}) with msg: {}", err, msg),
+            Err(err) => tracing::error!("ERROR ({}) with msg: {}", err, msg),
         }
     }
 
