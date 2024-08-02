@@ -2,6 +2,7 @@ use anyhow::{anyhow, Result};
 use lazy_static::lazy_static;
 use linked_hash_map::LinkedHashMap;
 use nostr_client_plus::__private::config::{load_config, AssignerConfig};
+use nostr_client_plus::__private::errors::Unrecoverable;
 use nostr_client_plus::__private::metrics::get_metrics_app;
 use nostr_client_plus::client::Client;
 use nostr_client_plus::event::UnsignedEvent;
@@ -140,6 +141,9 @@ async fn run() -> Result<()> {
                     tracing::debug!("Select from client ws relay");
                     if let Err(err) = handle_event(msg, &mut context, &pub_tx).await {
                         tracing::error!("{err}");
+                        if err.downcast_ref::<Unrecoverable>().is_some() {
+                            break;
+                        }
                     }
                 }
                 Some((workers, ev)) = pub_rx.recv() => {
@@ -214,7 +218,6 @@ async fn run() -> Result<()> {
     Ok(())
 }
 
-// If Some() is returned, then the event needs to be re-scheduled
 async fn handle_event(
     msg: RelayMessage,
     ctx: &mut Context,
@@ -278,6 +281,10 @@ async fn handle_event(
                 }
                 _ => Ok(()),
             }
+        }
+        RelayMessage::Disconnected => {
+            tracing::error!("Client got disconnected, we are shutting down");
+            Err(anyhow!(Unrecoverable))
         }
         _ => {
             tracing::warn!("non-event message");

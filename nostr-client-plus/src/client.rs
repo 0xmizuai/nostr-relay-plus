@@ -164,7 +164,11 @@ impl Client {
                     }
                 }
             }
-            // ToDo: before leaving the task, notify the user somehow that the client is unusable
+            if let Some(sink) = sink {
+                if sink.send(RelayMessage::Disconnected).await.is_err() {
+                    tracing::error!("Cannot send Disconnected message to user");
+                }
+            }
         });
 
         self.int_tx = Some(int_tx);
