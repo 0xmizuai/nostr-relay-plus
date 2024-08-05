@@ -1,6 +1,7 @@
+use axum::extract::State;
 use axum::routing::get;
 use axum::Router;
-use common_private::metrics::metrics_handler;
+use common_private::metrics::metrics_handler_body;
 use prometheus::Registry;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -17,4 +18,9 @@ pub async fn get_metrics_app(
         .await
         .expect("Cannot bind metrics server");
     (router, listener)
+}
+
+pub async fn metrics_handler(State(registry): State<Arc<Registry>>) -> String {
+    let metric_family = registry.gather();
+    metrics_handler_body(&metric_family).await
 }

@@ -9,6 +9,7 @@ use rand::random;
 use tokio::sync::mpsc;
 
 use crate::GlobalState;
+use crate::__private::metrics::{WS_CONNECTIONS};
 
 /// A subscription identifier has a maximum length
 const MAX_SUBSCRIPTION_ID_LEN: usize = 256;
@@ -33,17 +34,25 @@ impl LocalState {
         outgoing_sender: mpsc::Sender<Notice>,
         global_state: GlobalState,
     ) -> Self {
-        Self {
+        let res = Self {
             client_ip_addr, subscriptions: HashMap::new(),
             max_subs: 32,
             auth_challenge: random(),
             outgoing_sender,
             global_state,
             is_authenticated: false,
-        }
+        };
+        WS_CONNECTIONS.inc();
+        res
     }
 
     pub fn auth_challenge(&self) -> [u8; 32] {
         self.auth_challenge.clone()
+    }
+}
+
+impl Drop for LocalState {
+    fn drop(&mut self) {
+        WS_CONNECTIONS.dec();
     }
 }
