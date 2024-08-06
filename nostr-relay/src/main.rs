@@ -5,7 +5,6 @@ use anyhow::Result;
 use axum::routing::get;
 use axum::Router;
 use tower_http::cors::CorsLayer;
-use common_private::metrics::metrics_handler_body;
 use nostr_relay::{ws_wrapper, GlobalState};
 use nostr_relay::__private::metrics::{metrics_handler, REGISTRY, WS_CONNECTIONS};
 use tracing_subscriber::FmtSubscriber;
