@@ -7,6 +7,11 @@ use nostr_client_plus::job_protocol::{JobType, Kind, NewJobPayload, PayloadHeade
 use nostr_client_plus::utils::get_timestamp;
 use nostr_crypto::eoa_signer::EoaSigner;
 use nostr_crypto::sender_signer::SenderSigner;
+use nostr_plus_common::relay_message::RelayMessage;
+use std::time::Duration;
+use tokio::time::{interval, Instant};
+
+const TIMEOUT: Duration = Duration::from_secs(10);
 
 #[tokio::main]
 async fn main() {
@@ -40,7 +45,39 @@ async fn main() {
     // Create client
     let signer = EoaSigner::from_bytes(&private_key);
     let mut client = Client::new(SenderSigner::Eoa(signer));
-    client.connect(relay_url.as_str()).await.unwrap();
+    let mut relay_channel = client
+        .connect_with_channel(relay_url.as_str())
+        .await
+        .unwrap();
+
+    // start a listener just for OK messages
+    let mut timeout_timer = interval(TIMEOUT);
+    let mut last_activity = Instant::now();
+    let listener_handle = tokio::spawn(async move {
+        println!("OK Listener started");
+        loop {
+            tokio::select! {
+                Some(RelayMessage::Ok(ok_msg)) = relay_channel.recv() => {
+                    last_activity = Instant::now();
+                    if ok_msg.accepted {
+                        println!("Job published: {}", hex::encode(ok_msg.event_id));
+                    } else {
+                        println!(r#"Job {} rejected: "{}""#, hex::encode(ok_msg.event_id), ok_msg.message);
+                    }
+                }
+                _ = timeout_timer.tick() => {
+                    let now = Instant::now();
+                    if now.duration_since(last_activity) >= TIMEOUT {
+                        println!("No more OK messages within the last {}s, closing", TIMEOUT.as_secs());
+                        break;
+                    }
+                }
+                else => {
+                    println!("unhandled event");
+                }
+            }
+        }
+    });
 
     let timestamp_now = get_timestamp();
 
@@ -76,5 +113,7 @@ async fn main() {
             eprintln!("Cannot publish job");
         }
     }
+
+    listener_handle.await.unwrap();
     println!("Done");
 }

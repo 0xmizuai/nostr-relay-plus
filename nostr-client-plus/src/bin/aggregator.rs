@@ -123,6 +123,17 @@ async fn run() -> Result<()> {
                     }
                     _ => tracing::error!("Wrong kind of event received"),
                 },
+                RelayMessage::Ok(ok_msg) => {
+                    if ok_msg.accepted {
+                        tracing::debug!("Event {} accepted", hex::encode(ok_msg.event_id))
+                    } else {
+                        tracing::error!(
+                            r#"Event {} rejected: "{}""#,
+                            hex::encode(ok_msg.event_id),
+                            ok_msg.message
+                        );
+                    }
+                }
                 _ => tracing::info!("Non-Event message: ignored"),
             }
         }

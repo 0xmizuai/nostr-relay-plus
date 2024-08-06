@@ -73,6 +73,13 @@ async fn main() {
                             }
                             _ => eprintln!("Expecting just Assign events"),
                         },
+                        RelayMessage::Ok(ok_msg) => {
+                            if ok_msg.accepted {
+                                println!("Event {} accepted", hex::encode(ok_msg.event_id))
+                            } else {
+                                println!(r#"Event {} rejected: "{}""#, hex::encode(ok_msg.event_id), ok_msg.message);
+                            }
+                        }
                         _ => eprintln!("Ignoring non-event message"),
                     }
                 }

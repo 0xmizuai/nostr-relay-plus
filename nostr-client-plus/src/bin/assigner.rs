@@ -289,6 +289,18 @@ async fn handle_event(
                 _ => Ok(()),
             }
         }
+        RelayMessage::Ok(ok_msg) => {
+            if ok_msg.accepted {
+                tracing::debug!("Event {} accepted", hex::encode(ok_msg.event_id))
+            } else {
+                tracing::error!(
+                    r#"Event {} rejected: "{}""#,
+                    hex::encode(ok_msg.event_id),
+                    ok_msg.message
+                );
+            }
+            Ok(())
+        }
         RelayMessage::Disconnected => {
             tracing::error!("Client got disconnected, we are shutting down");
             Err(anyhow!(Unrecoverable))
