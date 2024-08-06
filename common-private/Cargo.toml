@@ -1,0 +1,10 @@
+[package]
+name = "common-private"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+axum = { workspace = true }
+prometheus = { workspace = true }
+tracing = { workspace = true }

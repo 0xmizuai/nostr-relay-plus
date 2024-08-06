@@ -10,10 +10,12 @@ license-file = "LICENSE"
 
 [dependencies]
 anyhow = { workspace = true }
+common-private = { workspace = true }
+lazy_static = { workspace = true }
 log = { workspace = true }
+prometheus = { workspace = true }
 hex = { workspace = true }
 num = { workspace = true }
-env_logger = { workspace = true }
 serde = { workspace = true }
 tokio = { workspace = true }
 futures = { workspace = true }

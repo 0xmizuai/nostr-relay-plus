@@ -5,8 +5,10 @@ use anyhow::Result;
 use axum::routing::get;
 use axum::Router;
 use tower_http::cors::CorsLayer;
-
 use nostr_relay::{ws_wrapper, GlobalState};
+use nostr_relay::__private::metrics::{metrics_handler, REGISTRY, WS_CONNECTIONS};
+use tracing_subscriber::FmtSubscriber;
+
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -17,10 +19,14 @@ async fn main() -> Result<()> {
         is_local = false;
     }
 
-    let mut builder = env_logger::Builder::from_default_env();
-    builder.format_timestamp(None);
-    builder.filter_level(log::LevelFilter::Debug);
-    builder.try_init()?;
+    // Logger setup
+    let subscriber = FmtSubscriber::builder()
+        .with_max_level(tracing::Level::DEBUG)
+        .finish();
+    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+
+    // Initialize metrics
+    register_metrics();
 
     let cors = CorsLayer::very_permissive();
     // .allow_methods([Method::GET, Method::POST])
@@ -33,6 +39,7 @@ async fn main() -> Result<()> {
     };
     let app = Router::new()
         .route("/health", get(|| async { "OK" }))
+        .route("/metrics", get(metrics_handler))
         .route("/", get(ws_wrapper))
         .layer(cors)
         .with_state(global_state);
@@ -51,4 +58,10 @@ async fn main() -> Result<()> {
     ).await.unwrap();
 
     Ok(())
+}
+
+fn register_metrics() {
+    REGISTRY
+        .register(Box::new(WS_CONNECTIONS.clone()))
+        .expect("Cannot register ws_connections");
 }
