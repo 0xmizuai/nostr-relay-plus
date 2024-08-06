@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
-use tokio::time::sleep;
+use tokio::time::{interval, sleep};
 use tracing_subscriber::FmtSubscriber;
 
 mod utils;
@@ -34,6 +34,7 @@ type PubStruct = (Vec<Sender>, RelayEvent); // Struct for passing jobs to assign
 
 // ToDo: we do not need so many, every few seconds new ones will show up.
 const MAX_WORKERS: usize = 10_000;
+const ALIVE_INTERVAL: Duration = Duration::from_secs(120); // how often we say we are alive
 
 lazy_static! {
     pub static ref REGISTRY: Registry = Registry::default();
@@ -135,6 +136,9 @@ async fn run() -> Result<()> {
             whitelist,
         };
 
+        // Prepare alive interval timer
+        let mut alive_interval_timer = interval(ALIVE_INTERVAL);
+
         loop {
             tokio::select! {
                 Some(msg) = relay_channel.recv() => {
@@ -189,6 +193,9 @@ async fn run() -> Result<()> {
                     } else {
                         ASSIGNED_JOBS.inc();
                     }
+                }
+                _ = alive_interval_timer.tick() => {
+                    tracing::info!("I am still alive");
                 }
                 else => {
                     tracing::warn!("Unexpected select event");
