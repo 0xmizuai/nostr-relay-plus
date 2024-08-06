@@ -8,6 +8,7 @@ use tower_http::cors::CorsLayer;
 use common_private::metrics::metrics_handler_body;
 use nostr_relay::{ws_wrapper, GlobalState};
 use nostr_relay::__private::metrics::{metrics_handler, REGISTRY, WS_CONNECTIONS};
+use tracing_subscriber::FmtSubscriber;
 
 
 #[tokio::main]
@@ -19,10 +20,11 @@ async fn main() -> Result<()> {
         is_local = false;
     }
 
-    let mut builder = env_logger::Builder::from_default_env();
-    builder.format_timestamp(None);
-    builder.filter_level(log::LevelFilter::Debug);
-    builder.try_init()?;
+    // Logger setup
+    let subscriber = FmtSubscriber::builder()
+        .with_max_level(tracing::Level::DEBUG)
+        .finish();
+    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
     // Initialize metrics
     register_metrics();
