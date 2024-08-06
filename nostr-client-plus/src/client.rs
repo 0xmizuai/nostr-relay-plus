@@ -7,13 +7,11 @@ use anyhow::{anyhow, Result};
 use nostr_crypto::sender_signer::SenderSigner;
 use nostr_crypto::signer::Signer;
 use nostr_plus_common::relay_message::RelayMessage;
-use nostr_plus_common::relay_ok::RelayOk;
 use nostr_plus_common::sender::Sender as NostrSender;
 use nostr_plus_common::types::{Bytes32, SubscriptionId};
 use std::collections::HashMap;
 use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender};
-use tokio::sync::oneshot;
-use tokio::time::{sleep, timeout, Duration};
+use tokio::time::{sleep, Duration};
 use tokio_tungstenite::tungstenite::Message;
 
 const RETRIES: u16 = 60; // WS reconnect attempts
@@ -61,8 +59,6 @@ impl Client {
         // Spawn listener
         let int_tx_clone = int_tx.clone();
         tokio::spawn(async move {
-            // Keep track of ack requests
-            let mut ack_table: HashMap<Bytes32, oneshot::Sender<RelayOk>> = HashMap::new();
             // Keep track of subscriptions
             let mut subscriptions: HashMap<SubscriptionId, (Request, Option<u64>)> = HashMap::new();
 
@@ -74,7 +70,7 @@ impl Client {
                         match maybe_ws_msg {
                             Some(msg) => match msg {
                                 Ok(Message::Text(message)) => {
-                                    Self::handle_incoming_message(message, &int_tx_clone, sink.as_ref()).await
+                                    Self::handle_incoming_message(message, sink.as_ref()).await
                                 }
                                 Ok(Message::Ping(_)) => {} // tungstenite handles Pong already
                                 Ok(Message::Close(c)) => tracing::warn!("Server closed connection: {:?}", c), // ToDo: do something
@@ -99,17 +95,10 @@ impl Client {
                                         need_reconnect = true;
                                     }
                                 }
-                                ClientCommand::Event((event, tx)) => {
-                                    // Add request to ack table
-                                    let _ = &ack_table.insert(event.id(), tx); // ToDo: handle existing entries
+                                ClientCommand::Event(event) => {
                                     if basic_ws.send_msg(Message::from(event.to_string())).await.is_err() {
                                         tracing::debug!("Event: websocket error");
                                         need_reconnect = true;
-                                    }
-                                }
-                                ClientCommand::Ack(ok_msg) => {
-                                    if let Some(tx) = ack_table.remove(&ok_msg.event_id) {
-                                        let _ = tx.send(ok_msg);
                                     }
                                 }
                                 ClientCommand::Close(close_msg) => {
@@ -178,23 +167,16 @@ impl Client {
 
     async fn handle_incoming_message(
         msg: String,
-        tx: &UnboundedSender<ClientCommand>,
         sink: Option<&Sender<RelayMessage>>,
     ) {
         match serde_json::from_str::<RelayMessage>(&msg) {
-            Ok(incoming) => match incoming {
-                RelayMessage::Ok(ok_msg) => {
-                    tracing::debug!("ACK: {}", serde_json::to_string(&ok_msg).unwrap());
-                    let _ = tx.send(ClientCommand::Ack(ok_msg));
-                }
-                relay_msg => match sink {
-                    None => tracing::warn!("Unhandled: {:?}", msg),
-                    Some(sender) => {
-                        if let Err(e) = sender.send(relay_msg).await {
-                            tracing::error!("{}", e);
-                        }
+            Ok(relay_msg) => match sink {
+                None => tracing::warn!("Unhandled: {:?}", msg),
+                Some(sender) => {
+                    if let Err(e) = sender.send(relay_msg).await {
+                        tracing::error!("{}", e);
                     }
-                },
+                }
             },
             Err(err) => tracing::error!("ERROR ({}) with msg: {}", err, msg),
         }
@@ -204,24 +186,8 @@ impl Client {
         match &self.int_tx {
             Some(int_tx) => {
                 let event = event.sign(&self.signer)?;
-
-                // Prepare ACK channel
-                let (tx, rx) = oneshot::channel::<RelayOk>();
-
-                int_tx.send(ClientCommand::Event((event, tx)))?;
-
-                // Wait for ACK with timeout
-                match timeout(Duration::from_secs(10), rx).await {
-                    Ok(Ok(msg)) => {
-                        if msg.accepted {
-                            Ok(())
-                        } else {
-                            Err(anyhow!("rejected: {}", msg.message))
-                        }
-                    }
-                    Ok(Err(err)) => Err(anyhow!("request failed: {}", err)),
-                    Err(err) => Err(anyhow!("ACK timeout: {}", err)),
-                }
+                int_tx.send(ClientCommand::Event(event))?;
+                Ok(())
             }
             None => return Err(anyhow!("Publish: missing internal channel")),
         }
