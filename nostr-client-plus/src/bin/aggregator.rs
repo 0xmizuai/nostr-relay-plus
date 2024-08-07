@@ -7,7 +7,6 @@ use nostr_client_plus::client::Client;
 use nostr_client_plus::db::FinishedJobs;
 use nostr_client_plus::job_protocol::{Kind, ResultPayload};
 use nostr_client_plus::request::{Filter, Request};
-use nostr_client_plus::utils::get_timestamp;
 use nostr_crypto::eoa_signer::EoaSigner;
 use nostr_crypto::sender_signer::SenderSigner;
 use nostr_plus_common::relay_event::RelayEvent;
@@ -169,7 +168,7 @@ async fn run() -> Result<()> {
                 let db_entry = FinishedJobs {
                     _id: raw_data_id,
                     workers: vec![sender.clone()], // if we remove first, no need to clone but this is safer
-                    timestamp: get_timestamp(),
+                    timestamp: chrono::Utc::now().timestamp() as u64,
                     result: new_payload.clone(),
                     job_type,
                 };
@@ -216,7 +215,7 @@ async fn run() -> Result<()> {
                         let db_entry = FinishedJobs {
                             _id: raw_data_id,
                             workers: workers.clone(), // if we remove first, no need to clone but this is safer
-                            timestamp: get_timestamp(),
+                            timestamp: chrono::Utc::now().timestamp() as u64,
                             result: new_payload,
                             job_type,
                         };
@@ -244,7 +243,7 @@ async fn run() -> Result<()> {
     let sub_id = "be4788ade0000000000000000000000000000000000000000000000000001111";
     let filter = Filter {
         kinds: vec![Kind::RESULT],
-        since: Some(get_timestamp()),
+        since: Some(chrono::Utc::now().timestamp() as u64),
         ..Default::default()
     };
     let req = Request::new(sub_id.to_string(), vec![filter]);

@@ -8,7 +8,6 @@ use nostr_client_plus::{
     event::UnsignedEvent,
     job_protocol::Kind,
     request::{Filter, Request},
-    utils::get_timestamp,
 };
 use nostr_crypto::eoa_signer::EoaSigner;
 use nostr_crypto::sender_signer::SenderSigner;
@@ -86,7 +85,7 @@ async fn main() {
                 _ = heartbeat.tick() => {
                     let event = UnsignedEvent::new(
                         client_clone.lock().await.sender(),
-                        get_timestamp(),
+                        chrono::Utc::now().timestamp() as u64,
                         Kind::ALIVE,
                         vec![],
                         String::default(),
@@ -105,7 +104,7 @@ async fn main() {
     // Subscribe to Assign
     let filter = Filter {
         kinds: vec![Kind::ASSIGN],
-        since: Some(get_timestamp()),
+        since: Some(chrono::Utc::now().timestamp() as u64),
         tags: HashMap::from([("#p".to_string(), json!([client_id]))]),
         ..Default::default()
     };
@@ -149,7 +148,7 @@ fn get_result_event(
     };
     let ev = UnsignedEvent::new(
         sender,
-        get_timestamp(),
+        chrono::Utc::now().timestamp() as u64,
         Kind::RESULT,
         vec![vec!["e".to_string(), job_id]],
         content,

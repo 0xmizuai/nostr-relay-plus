@@ -8,7 +8,6 @@ use nostr_client_plus::client::Client;
 use nostr_client_plus::event::UnsignedEvent;
 use nostr_client_plus::job_protocol::{JobType, Kind};
 use nostr_client_plus::request::{Filter, Request};
-use nostr_client_plus::utils::get_timestamp;
 use nostr_crypto::eoa_signer::EoaSigner;
 use nostr_crypto::sender_signer::SenderSigner;
 use nostr_plus_common::relay_event::RelayEvent;
@@ -157,7 +156,7 @@ async fn run() -> Result<()> {
                     for w in workers {
                         tags.push(vec!["p".to_string(), hex::encode(w.to_bytes())]);
                     }
-                    let timestamp = get_timestamp();
+                    let timestamp = chrono::Utc::now().timestamp() as u64;
                     let event = UnsignedEvent::new(
                         client_eh.lock().await.sender(),
                         timestamp,
@@ -206,11 +205,12 @@ async fn run() -> Result<()> {
 
     // subscription id used for NewJob and Alive
     let sub_id = "ce4788ade0000000000000000000000000000000000000000000000000000000";
+    let current_time = chrono::Utc::now().timestamp() as u64;
 
     // Subscribe to NewJob and Alive
     let filter = Filter {
         kinds: vec![Kind::NEW_JOB, Kind::ALIVE],
-        since: Some(get_timestamp()),
+        since: Some(current_time),
         ..Default::default()
     };
     let req = Request::new(sub_id.to_string(), vec![filter]);

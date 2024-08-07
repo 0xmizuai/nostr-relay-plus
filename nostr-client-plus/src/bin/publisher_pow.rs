@@ -2,7 +2,6 @@ use nostr_client_plus::client::Client;
 use nostr_client_plus::crypto::CryptoHash;
 use nostr_client_plus::event::UnsignedEvent;
 use nostr_client_plus::job_protocol::{JobType, Kind, NewJobPayload, PayloadHeader};
-use nostr_client_plus::utils::get_timestamp;
 use nostr_crypto::eoa_signer::EoaSigner;
 use nostr_crypto::sender_signer::SenderSigner;
 use nostr_plus_common::relay_message::RelayMessage;
@@ -70,7 +69,7 @@ async fn main() {
         }
     });
 
-    let timestamp_now = get_timestamp();
+    let timestamp_now = chrono::Utc::now().timestamp() as u64;
 
     // Get type job id and name
     let job_type = JobType::PoW.job_type();
