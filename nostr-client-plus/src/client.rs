@@ -34,12 +34,19 @@ impl Client {
         self._connect(url, None).await
     }
 
-    pub async fn connect_with_channel(&mut self, url: &str) -> Result<Receiver<RelayMessage>> {
-        let (ext_tx, ext_rx) = mpsc::channel(10);
+    pub async fn connect_with_channel(
+        &mut self,
+        url: &str,
+    ) -> Result<UnboundedReceiver<RelayMessage>> {
+        let (ext_tx, ext_rx) = mpsc::unbounded_channel();
         self._connect(url, Some(ext_tx)).await.map(|_| ext_rx)
     }
 
-    pub async fn _connect(&mut self, url: &str, sink: Option<Sender<RelayMessage>>) -> Result<()> {
+    pub async fn _connect(
+        &mut self,
+        url: &str,
+        sink: Option<UnboundedSender<RelayMessage>>,
+    ) -> Result<()> {
         // If already connected, ignore. ToDo: handle this better
         if self.int_tx.is_some() {
             return Err(anyhow!("Already connected"));
@@ -156,7 +163,7 @@ impl Client {
                 }
             }
             if let Some(sink) = sink {
-                if sink.send(RelayMessage::Disconnected).await.is_err() {
+                if sink.send(RelayMessage::Disconnected).is_err() {
                     tracing::error!("Cannot send Disconnected message to user");
                 }
             }
@@ -167,15 +174,12 @@ impl Client {
         Ok(())
     }
 
-    async fn handle_incoming_message(
-        msg: String,
-        sink: Option<&Sender<RelayMessage>>,
-    ) {
+    async fn handle_incoming_message(msg: String, sink: Option<&UnboundedSender<RelayMessage>>) {
         match serde_json::from_str::<RelayMessage>(&msg) {
             Ok(relay_msg) => match sink {
                 None => tracing::warn!("Unhandled: {:?}", msg),
                 Some(sender) => {
-                    if let Err(e) = sender.send(relay_msg).await {
+                    if let Err(e) = sender.send(relay_msg) {
                         tracing::error!("{}", e);
                     }
                 }
