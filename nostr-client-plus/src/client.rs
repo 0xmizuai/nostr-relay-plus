@@ -67,6 +67,7 @@ impl Client {
             loop {
                 tokio::select! {
                     maybe_ws_msg = basic_ws.read_msg() => {
+                        tracing::debug!("Msg from websocket");
                         match maybe_ws_msg {
                             Some(msg) => match msg {
                                 Ok(Message::Text(message)) => {
@@ -84,6 +85,7 @@ impl Client {
                         }
                     }
                     maybe_int_msg = int_rx.recv() => {
+                        tracing::debug!("Internal channel message");
                         match maybe_int_msg {
                             Some(message) => match message {
                                 ClientCommand::Req((req, since_offset)) => {

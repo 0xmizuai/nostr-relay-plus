@@ -88,6 +88,7 @@ impl LocalState {
 
     pub async fn handle_global_incoming_events(&self, event: Event) -> Result<()> {
         let id = self.is_interested(&event)?;
+        tracing::info!("Sending event of type {} for subscription {}", event.kind, id);
         let notice = Notice::event(id, event);
         self.outgoing_sender.send(notice).await?;
 
