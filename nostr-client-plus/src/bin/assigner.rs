@@ -14,7 +14,8 @@ use nostr_plus_common::relay_event::RelayEvent;
 use nostr_plus_common::relay_message::RelayMessage;
 use nostr_plus_common::sender::Sender;
 use prometheus::{IntCounter, IntGauge, Registry};
-use std::collections::{BTreeSet, VecDeque};
+use serde_json::json;
+use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -57,7 +58,8 @@ async fn run() -> Result<()> {
     // Define needed env variables
     dotenv::dotenv().ok();
     let relay_url = std::env::var("RELAY_URL").unwrap_or("ws://127.0.0.1:3033".to_string());
-    let raw_private_key = std::env::var("ASSIGNER_PRIVATE_KEY").unwrap();
+    let raw_private_key = std::env::var("ASSIGNER_PRIVATE_KEY").expect("Missing private key");
+    let min_hb = std::env::var("MIN_HB_VERSION").expect("Missing min HB version");
 
     // Command line parsing
     let args: Vec<String> = std::env::args().collect();
@@ -207,15 +209,26 @@ async fn run() -> Result<()> {
     let sub_id = "ce4788ade0000000000000000000000000000000000000000000000000000000";
     let current_time = chrono::Utc::now().timestamp() as u64;
 
-    // Subscribe to NewJob and Alive
-    let filter = Filter {
-        kinds: vec![Kind::NEW_JOB, Kind::ALIVE],
+    // Subscribe to NewJob and Alive/Heartbeats
+    let filter_job = Filter {
+        kinds: vec![Kind::NEW_JOB],
         since: Some(current_time),
         ..Default::default()
     };
-    let req = Request::new(sub_id.to_string(), vec![filter]);
-    client.lock().await.subscribe(req, Some(0)).await.unwrap();
-    tracing::info!("Subscribed to NewJob and Alive");
+    let filter_hb = Filter {
+        kinds: vec![Kind::ALIVE],
+        since: Some(current_time),
+        tags: HashMap::from([("#v".to_string(), json!(["1".to_string()]))]),
+        ..Default::default()
+    };
+    let req = Request::new(sub_id.to_string(), vec![filter_job, filter_hb]);
+    client
+        .lock()
+        .await
+        .subscribe(req, Some(0))
+        .await
+        .expect("Cannot subscribe");
+    tracing::info!("Subscribed to NewJob and Heartbeats");
 
     tokio::select! {
         _ = event_handler => tracing::warn!("event handler task has stopped"),
@@ -234,6 +247,7 @@ async fn handle_event(
         RelayMessage::Event(ev) => {
             match ev.event.kind {
                 Kind::ALIVE => {
+                    tracing::debug!("Heartbeat received: {:?}", ev.event.tags);
                     let worker_id = ev.event.sender.clone();
                     if let None = ctx.book.insert(worker_id, ()) {
                         WORKERS_ONLINE.inc();

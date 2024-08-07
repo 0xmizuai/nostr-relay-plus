@@ -17,8 +17,11 @@ We provide one in `src/bin/config.toml`; check inline comments for more informat
 
 ### Assigner
 
-Assigner accepts one environment variable: `RELAY_URL`.
-`RELAY_URL` is optional and it defaults to `ws://127.0.0.1:3031`.
+Assigner accepts a few environment variables.  
+`RELAY_URL` is optional, and it defaults to `ws://127.0.0.1:3031`.  
+`ASSIGNER_PRIVATE_KEY` is mandatory.  
+`MIN_HB_VERSION` is mandatory, and it is a numerical value.
+
 
 Assigner needs to run with a configuration file from which it reads the whitelisted senders.
 If not present or empty, it won't start.

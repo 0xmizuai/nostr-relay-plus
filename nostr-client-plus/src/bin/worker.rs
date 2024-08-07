@@ -87,7 +87,9 @@ async fn main() {
                         client_clone.lock().await.sender(),
                         chrono::Utc::now().timestamp() as u64,
                         Kind::ALIVE,
-                        vec![],
+                        vec![
+                            vec!["v".to_string(), "1".to_string()],
+                        ],
                         String::default(),
                     );
                     client_clone.lock().await.publish(event).await.unwrap();
