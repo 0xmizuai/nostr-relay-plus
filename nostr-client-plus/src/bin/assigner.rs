@@ -42,7 +42,7 @@ const STALE_TIME: Duration = Duration::from_secs(300);
 lazy_static! {
     pub static ref REGISTRY: Registry = Registry::default();
     pub static ref ASSIGNED_JOBS: IntCounter =
-        IntCounter::new("assigned_jobs", "Assigned Jobs").expect("Failed to create assigned_jobs");
+        IntCounter::new("assigned_jobs_total", "Total Assigned Jobs").expect("Failed to create assigned_jobs");
     pub static ref CACHED_JOBS: IntGauge =
         IntGauge::new("cached_jobs", "Cached Jobs").expect("Failed to create cached_jobs");
     pub static ref WORKERS_ONLINE: IntGauge =
