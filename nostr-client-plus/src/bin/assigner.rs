@@ -17,7 +17,7 @@ use prometheus::{IntCounter, IntGauge, Registry};
 use serde_json::json;
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tokio::time::{interval, sleep};
@@ -26,7 +26,8 @@ use tracing_subscriber::FmtSubscriber;
 mod utils;
 use crate::utils::get_single_tag_entry;
 
-type WorkersBook = LinkedHashMap<Sender, ()>;
+type WorkersBook = LinkedHashMap<Sender, Instant>;
+type AssignedSenders = HashMap<Sender, Instant>;
 type NumWorkers = usize;
 type JobQueue = VecDeque<(RelayEvent, NumWorkers)>;
 
@@ -35,6 +36,7 @@ type PubStruct = (Vec<Sender>, RelayEvent); // Struct for passing jobs to assign
 // ToDo: we do not need so many, every few seconds new ones will show up.
 const MAX_WORKERS: usize = 10_000;
 const ALIVE_INTERVAL: Duration = Duration::from_secs(120); // how often we say we are alive
+const COOL_DOWN_PERIOD: Duration = Duration::from_secs(30);
 
 lazy_static! {
     pub static ref REGISTRY: Registry = Registry::default();
@@ -126,8 +128,9 @@ async fn run() -> Result<()> {
         let (pub_tx, mut pub_rx) = mpsc::channel(100);
 
         // Data structure to keep track of most recent workers
-        // ToDo: We don't use the value, so a HashSet maintaining insertion order, should suffice
         let avail_workers = WorkersBook::new();
+        // Keep track of last time senders were assigned a job
+        let mut assigned_senders = Arc::new(Mutex::new(AssignedSenders::new()));
         // Queue of jobs that cannot be assigned immediately
         let job_queue = VecDeque::new();
 
@@ -135,6 +138,7 @@ async fn run() -> Result<()> {
             book: avail_workers,
             queue: job_queue,
             whitelist,
+            assigned_senders: Arc::clone(&assigned_senders),
         };
 
         // Prepare alive interval timer
@@ -155,7 +159,7 @@ async fn run() -> Result<()> {
                     tracing::debug!(r#"Sending "{}""#, ev.event.content);
                     let mut tags: Vec<Vec<String>> = Vec::with_capacity(workers.len());
                     tags.push(vec!["e".to_string(), hex::encode(ev.event.id)]);
-                    for w in workers {
+                    for w in &workers {
                         tags.push(vec!["p".to_string(), hex::encode(w.to_bytes())]);
                     }
                     let timestamp = chrono::Utc::now().timestamp() as u64;
@@ -173,6 +177,7 @@ async fn run() -> Result<()> {
                     if client_eh.lock().await.publish(event).await.is_err() {
                         // Spawn a task to retry a few times in case ACK did not arrive on time
                         // or client reconnecting.
+                        let mut assigned_senders_clone = Arc::clone(&assigned_senders);
                         let _ = tokio::spawn(async move {
                             let mut counter = 0;
                             while counter < 5 {
@@ -186,12 +191,24 @@ async fn run() -> Result<()> {
                                 }
                             }
                             if counter < 5 {
+                                // Record when senders have been given jobs
+                                let current_instant = Instant::now();
+                                for w in &workers {
+                                    let mut assigned_senders = (&mut assigned_senders_clone).lock().await;
+                                    assigned_senders.insert(w.clone(), current_instant);
+                                }
                                 ASSIGNED_JOBS.inc();
                             } else {
                                 tracing::error!("Could not assign event {}", hex::encode(event_clone.id()));
                             }
                         });
                     } else {
+                        // Record when senders have been given jobs
+                        let current_instant = Instant::now();
+                        for w in &workers {
+                            let mut assigned_senders = (&mut assigned_senders).lock().await;
+                            assigned_senders.insert(w.clone(), current_instant);
+                        }
                         ASSIGNED_JOBS.inc();
                     }
                 }
@@ -249,7 +266,11 @@ async fn handle_event(
                 Kind::ALIVE => {
                     tracing::debug!("Heartbeat received: {:?}", ev.event.tags);
                     let worker_id = ev.event.sender.clone();
-                    if let None = ctx.book.insert(worker_id, ()) {
+                    if is_too_early(&ev.event.sender, ctx).await {
+                        tracing::info!("HB from {} too early", hex::encode(worker_id.to_bytes()));
+                        return Ok(());
+                    }
+                    if let None = ctx.book.insert(worker_id, Instant::now()) {
                         WORKERS_ONLINE.inc();
                     }
                     tracing::debug!("HB, now {}", ctx.book.len());
@@ -360,6 +381,7 @@ struct Context {
     book: WorkersBook,
     queue: JobQueue,
     whitelist: BTreeSet<Sender>,
+    assigned_senders: Arc<Mutex<AssignedSenders>>,
 }
 
 fn register_metrics() {
@@ -372,4 +394,18 @@ fn register_metrics() {
     REGISTRY
         .register(Box::new(WORKERS_ONLINE.clone()))
         .expect("Cannot register workers_online");
+}
+
+async fn is_too_early(sender: &Sender, ctx: &mut Context) -> bool {
+    let mut assigned_senders = ctx.assigned_senders.lock().await;
+    if let Some(last_assigned) = assigned_senders.get(sender) {
+        let current_time = Instant::now();
+        if current_time.duration_since(*last_assigned) >= COOL_DOWN_PERIOD {
+            false
+        } else {
+            true
+        }
+    } else {
+        false
+    }
 }
