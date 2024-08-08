@@ -236,7 +236,7 @@ async fn run() -> Result<()> {
     let filter_hb = Filter {
         kinds: vec![Kind::ALIVE],
         since: Some(current_time),
-        tags: HashMap::from([("#v".to_string(), json!(["1".to_string()]))]),
+        tags: HashMap::from([("#v".to_string(), json!([min_hb.to_string()]))]),
         ..Default::default()
     };
     let req = Request::new(sub_id.to_string(), vec![filter_job, filter_hb]);
