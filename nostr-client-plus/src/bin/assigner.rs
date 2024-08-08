@@ -37,6 +37,7 @@ type PubStruct = (Vec<Sender>, RelayEvent); // Struct for passing jobs to assign
 const MAX_WORKERS: usize = 10_000;
 const ALIVE_INTERVAL: Duration = Duration::from_secs(120); // how often we say we are alive
 const COOL_DOWN_PERIOD: Duration = Duration::from_secs(30);
+const STALE_TIME: Duration = Duration::from_secs(300);
 
 lazy_static! {
     pub static ref REGISTRY: Registry = Registry::default();
@@ -277,18 +278,19 @@ async fn handle_event(
                     // Check if there is a queue to empty
                     while !ctx.queue.is_empty() {
                         tracing::debug!("Emptying queue with {} el", ctx.queue.len());
-                        // peek first and check how many workers are needed
-                        if let Some((_, num_workers)) = ctx.queue.front() {
-                            if num_workers > &ctx.book.len() {
+                        let num_workers = match check_avail_workers(ctx) {
+                            None => {
                                 tracing::debug!("Not enough workers for this event");
                                 break;
                             }
-                        } else {
-                            tracing::error!("Queue should not be empty");
-                        }
-                        let (ev, num_workers) = ctx.queue.pop_front().unwrap();
+                            Some(num_w) => num_w,
+                        };
+                        let workers = match get_workers(&mut ctx.book, num_workers) {
+                            None => break,
+                            Some(res) => res,
+                        };
+                        let (ev, _) = ctx.queue.pop_front().unwrap();
                         CACHED_JOBS.dec();
-                        let workers = get_workers(&mut ctx.book, num_workers);
                         pub_tx
                             .send((workers, ev))
                             .await
@@ -313,7 +315,15 @@ async fn handle_event(
                         ctx.queue.push_back((ev, num_workers));
                         CACHED_JOBS.inc();
                     } else {
-                        let workers = get_workers(&mut ctx.book, num_workers);
+                        let workers = match get_workers(&mut ctx.book, num_workers) {
+                            None => {
+                                // not enough workers, queue
+                                ctx.queue.push_back((ev, num_workers));
+                                CACHED_JOBS.inc();
+                                return Ok(());
+                            }
+                            Some(res) => res,
+                        };
                         pub_tx
                             .send((workers, ev))
                             .await
@@ -348,19 +358,41 @@ async fn handle_event(
 }
 
 #[inline]
-fn get_workers(book: &mut WorkersBook, num_workers: NumWorkers) -> Vec<Sender> {
+fn get_workers(book: &mut WorkersBook, num_workers: NumWorkers) -> Option<Vec<Sender>> {
     tracing::debug!(
         "get_workers: getting {} workers out of {}",
         num_workers,
         book.len()
     );
+
+    let current_instant = Instant::now();
+
+    // This is an approximation to avoid storing the Instants for every valid worker.
+    // So, all the workers reinserted in the queue wil have this value.
+    // It is initialized with current_instant, but it won't be used, or used when
+    // updated with a better instant
+    let mut last_valid_instant = current_instant;
+
     let mut workers = Vec::with_capacity(num_workers);
     for _ in 0..num_workers {
-        let (w, _) = book.pop_back().expect("There should be enough workers");
+        let (w, inst) = book.pop_back()?;
+        // check if entry is stale
+        if current_instant.duration_since(inst) >= STALE_TIME {
+            // This entry and all the other ones still in the linked hashmap are stale.
+            // Ignore this one, drain the linked hashmap, put back the ones saved in vector
+            // but in the reverse order.
+            book.clear();
+            for w in workers.into_iter().rev() {
+                book.insert(w, last_valid_instant);
+            }
+            tracing::warn!("Stale workers, trimmed");
+            return None;
+        }
+        last_valid_instant = inst;
         workers.push(w);
     }
     WORKERS_ONLINE.sub(num_workers as i64);
-    workers
+    Some(workers)
 }
 
 fn validate_job(ev: &RelayEvent, ctx: &Context) -> Result<NumWorkers> {
@@ -407,5 +439,18 @@ async fn is_too_early(sender: &Sender, ctx: &mut Context) -> bool {
         }
     } else {
         false
+    }
+}
+
+// Check how many workers are needed and return the number
+// if there is a sufficient number. None otherwise.
+fn check_avail_workers(ctx: &mut Context) -> Option<NumWorkers> {
+    if let Some((_, num_workers)) = ctx.queue.front() {
+        if num_workers > &ctx.book.len() {
+            return None;
+        }
+        Some(*num_workers)
+    } else {
+        None
     }
 }
