@@ -1,4 +1,4 @@
-use crate::{crypto::CryptoHash, job_protocol::JobType};
+use crate::crypto::CryptoHash;
 use crate::job_protocol::ResultPayload;
 use anyhow::Result;
 use futures::StreamExt;
@@ -31,7 +31,8 @@ pub struct FinishedJobs {
     pub workers: Vec<Sender>,
     pub timestamp: Timestamp,
     pub result: ResultPayload,
-    pub job_type: u16, // TODO: 
+    pub job_type: u16, // TODO:
+    pub assign_event_id: String,
 }
 
 pub async fn select_many<T>(

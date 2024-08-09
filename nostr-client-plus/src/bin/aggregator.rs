@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use lazy_static::lazy_static;
+use mongodb::bson::doc;
 use mongodb::{Client as DbClient, Collection};
 use nostr_client_plus::__private::config::{load_config, AggregatorConfig};
 use nostr_client_plus::__private::metrics::get_metrics_app;
@@ -12,9 +13,10 @@ use nostr_crypto::sender_signer::SenderSigner;
 use nostr_plus_common::relay_event::RelayEvent;
 use nostr_plus_common::relay_message::RelayMessage;
 use nostr_plus_common::sender::Sender;
+use nostr_plus_common::wire::EventOnWire;
 use prometheus::{IntCounter, Registry};
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing_subscriber::FmtSubscriber;
@@ -22,7 +24,7 @@ use tracing_subscriber::FmtSubscriber;
 mod utils;
 use crate::utils::{get_private_key_from_name, get_single_tag_entry};
 
-type AggrMessage = (String, (Sender, ResultPayload));
+type AggrMessage = (String, (Sender, ResultPayload, EventOnWire));
 
 lazy_static! {
     pub static ref REGISTRY: Registry = Registry::default();
@@ -58,6 +60,17 @@ async fn run() -> Result<()> {
 
     // Get configuration from file
     let config: AggregatorConfig = load_config(config_file_path, "aggregator")?.try_into()?;
+
+    // Check assigner_whitelist is not empty and then create a set out of it
+    if config.assigner_whitelist.is_empty() {
+        return Err(anyhow!("assigner_whitelist is empty"));
+    }
+    let assigner_whitelist: BTreeSet<Sender> = config
+        .assigner_whitelist
+        .into_iter()
+        .map(|s| hex::decode(s).expect("Cannot decode"))
+        .map(|s| Sender::from_bytes(&s).expect("Cannot convert from bytes"))
+        .collect();
 
     // Logger setup
     let subscriber = FmtSubscriber::builder()
@@ -109,7 +122,8 @@ async fn run() -> Result<()> {
                         if let Ok(payload) = get_result_payload(&ev) {
                             if let Ok(Some(job_id)) = get_single_tag_entry('e', &ev.event.tags) {
                                 let sender = ev.event.sender;
-                                let value = (job_id, (sender, payload));
+                                let assign_event = payload.assign_event.clone();
+                                let value = (job_id, (sender, payload, assign_event));
                                 if aggr_tx.send(value).await.is_err() {
                                     tracing::error!("Cannot send to aggregator task");
                                 }
@@ -148,7 +162,7 @@ async fn run() -> Result<()> {
         // keep track of results for matching
         let mut aggr_book: HashMap<String, (Vec<Sender>, ResultPayload)> = HashMap::new();
 
-        while let Some((job_id, (sender, new_payload))) = aggr_rx.recv().await {
+        while let Some((job_id, (sender, new_payload, assign_event))) = aggr_rx.recv().await {
             // TODO: parse JobType
             let job_type = new_payload.header.job_type;
             let n_winners = match job_type {
@@ -162,6 +176,60 @@ async fn run() -> Result<()> {
                 continue;
             }
 
+            // Check assigner in whitelist
+            if !assigner_whitelist.contains(&assign_event.sender) {
+                tracing::error!("assigner not in whitelist");
+                continue;
+            }
+
+            if let Ok(Some(assignee)) = get_single_tag_entry('p', &assign_event.tags) {
+                // Check assignee is Result sender
+                if let Ok(assignee_hex) = hex::decode(assignee) {
+                    if let Some(assignee_account) = Sender::from_bytes(&assignee_hex) {
+                        if assignee_account != sender {
+                            tracing::error!("assignee mismatch");
+                            continue;
+                        }
+
+                        // Verify assign_event signature
+                        let expected_hash = assign_event.to_id_hash();
+                        if expected_hash != assign_event.id {
+                            tracing::error!("invalid assign_event id");
+                            continue;
+                        }
+                        if let Err(_) = assign_event
+                            .sender
+                            .validate_signature(expected_hash, &assign_event.sig)
+                        {
+                            tracing::error!("invalid assign_event sig");
+                            continue;
+                        }
+                    } else {
+                        tracing::error!("invalid p tag in assign_event");
+                        continue;
+                    }
+                } else {
+                    tracing::error!("invalid p tag in assign_event");
+                    continue;
+                }
+            } else {
+                tracing::error!("missing p tag in assign_event");
+                continue;
+            }
+
+            // Check repeated assign event id
+            let exist = collection
+                .find_one(
+                    doc! { "assign_event_id": hex::encode(&assign_event.id) },
+                    None,
+                )
+                .await
+                .unwrap_or(None);
+            if let Some(_) = exist {
+                tracing::error!("repeated assign_event id");
+                continue;
+            }
+
             if n_winners <= 1 {
                 tracing::debug!("The job needs only one worker! {}", job_id);
                 let raw_data_id = new_payload.header.raw_data_id.clone();
@@ -171,7 +239,9 @@ async fn run() -> Result<()> {
                     timestamp: chrono::Utc::now().timestamp() as u64,
                     result: new_payload.clone(),
                     job_type,
+                    assign_event_id: hex::encode(&assign_event.id),
                 };
+
                 match collection.insert_one(db_entry, None).await {
                     Ok(_) => {
                         FINISHED_JOBS.inc();
@@ -218,6 +288,7 @@ async fn run() -> Result<()> {
                             timestamp: chrono::Utc::now().timestamp() as u64,
                             result: new_payload,
                             job_type,
+                            assign_event_id: hex::encode(&assign_event.id),
                         };
                         match collection.insert_one(db_entry, None).await {
                             Ok(_) => {
