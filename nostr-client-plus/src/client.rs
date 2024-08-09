@@ -42,7 +42,7 @@ impl Client {
         self._connect(url, Some(ext_tx)).await.map(|_| ext_rx)
     }
 
-    pub async fn _connect(
+    async fn _connect(
         &mut self,
         url: &str,
         sink: Option<UnboundedSender<RelayMessage>>,
@@ -100,22 +100,30 @@ impl Client {
                                     let req_str = req.to_string();
                                     subscriptions.insert(req.subscription_id.clone(), (req, since_offset));
                                     if basic_ws.send_msg(Message::from(req_str)).await.is_err() {
-                                        tracing::debug!("Req: websocket error");
+                                        tracing::error!("Req: websocket error");
                                         need_reconnect = true;
                                     }
                                 }
                                 ClientCommand::Event(event) => {
                                     if basic_ws.send_msg(Message::from(event.to_string())).await.is_err() {
-                                        tracing::debug!("Event: websocket error");
+                                        tracing::error!("Event: websocket error");
                                         need_reconnect = true;
                                     }
                                 }
                                 ClientCommand::Close(close_msg) => {
                                     if basic_ws.send_msg(Message::from(close_msg.to_string())).await.is_err() {
-                                        tracing::debug!("Close subscription: websocket error");
+                                        tracing::error!("Close subscription: websocket error");
                                         need_reconnect = true;
                                     } else {
                                         subscriptions.remove(&close_msg.subscription_id);
+                                    }
+                                }
+                                ClientCommand::Binary(message) => {
+                                    // Note: only send_binary sends this message and we check there
+                                    //  that it is a Message::Binary. But not really future-proof.
+                                    if basic_ws.send_msg(message).await.is_err() {
+                                        tracing::error!("Binary send: websocket error");
+                                        need_reconnect = true;
                                     }
                                 }
                             }
@@ -189,14 +197,10 @@ impl Client {
     }
 
     pub async fn publish(&self, event: UnsignedEvent) -> Result<()> {
-        match &self.int_tx {
-            Some(int_tx) => {
-                let event = event.sign(&self.signer)?;
-                int_tx.send(ClientCommand::Event(event))?;
-                Ok(())
-            }
-            None => return Err(anyhow!("Publish: missing internal channel")),
-        }
+        let int_tx = self._get_send_channel()?;
+        let event = event.sign(&self.signer)?;
+        int_tx.send(ClientCommand::Event(event))?;
+        Ok(())
     }
 
     pub fn sender(&self) -> NostrSender {
@@ -236,5 +240,25 @@ impl Client {
             None => return Err(anyhow!("Close subscription: missing websocket")),
         }
         Ok(())
+    }
+
+    /// This function is a general purpose function to give a chance to users
+    /// to send their own binary format
+    pub async fn send_binary(&self, message: Message) -> Result<()> {
+        match &message {
+            Message::Binary(request) => {
+                let int_tx = self._get_send_channel()?;
+                int_tx.send(ClientCommand::Binary(message))?;
+                Ok(())
+            }
+            _ => Err(anyhow!("Invalid message variant")),
+        }
+    }
+
+    fn _get_send_channel(&self) -> Result<&UnboundedSender<ClientCommand>> {
+        match &self.int_tx {
+            Some(tx) => Ok(tx),
+            None => Err(anyhow!("Missing internal channel")),
+        }
     }
 }
