@@ -10,6 +10,7 @@ use nostr_client_plus::job_protocol::{JobType, Kind};
 use nostr_client_plus::request::{Filter, Request};
 use nostr_crypto::eoa_signer::EoaSigner;
 use nostr_crypto::sender_signer::SenderSigner;
+use nostr_plus_common::binary_protocol::BinaryMessage;
 use nostr_plus_common::relay_event::RelayEvent;
 use nostr_plus_common::relay_message::RelayMessage;
 use nostr_plus_common::sender::Sender;
@@ -21,6 +22,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tokio::time::{interval, sleep};
+use tokio_tungstenite::tungstenite::Message;
 use tracing_subscriber::FmtSubscriber;
 
 mod utils;
@@ -215,6 +217,11 @@ async fn run() -> Result<()> {
                 }
                 _ = alive_interval_timer.tick() => {
                     tracing::info!("I am still alive");
+                    // Request info about current subscriptions
+                    let query = BinaryMessage::QuerySubscription;
+                    if client_eh.lock().await.send_binary(Message::Binary(query.to_bytes())).await.is_err() {
+                        tracing::error!("Cannot query subscriptino status");
+                    }
                 }
                 else => {
                     tracing::warn!("Unexpected select event");
@@ -350,8 +357,24 @@ async fn handle_event(
             tracing::error!("Client got disconnected, we are shutting down");
             Err(anyhow!(Unrecoverable))
         }
-        _ => {
-            tracing::warn!("non-event message");
+        RelayMessage::EOSE => {
+            tracing::debug!("EOSE message");
+            Ok(())
+        }
+        RelayMessage::Closed => {
+            tracing::warn!("Closed message");
+            Ok(())
+        } // ToDo: maybe do something
+        RelayMessage::Notice => {
+            tracing::debug!("Notice message");
+            Ok(())
+        }
+        RelayMessage::Auth(_) => {
+            tracing::debug!("Auth message");
+            Ok(())
+        }
+        RelayMessage::Binary(msg) => {
+            handle_binary(&msg[..])?;
             Ok(())
         }
     }
@@ -453,4 +476,15 @@ fn check_avail_workers(ctx: &mut Context) -> Option<NumWorkers> {
     } else {
         None
     }
+}
+
+fn handle_binary(msg: &[u8]) -> Result<()> {
+    let binary_msg = BinaryMessage::from_bytes(msg)?;
+    match binary_msg {
+        BinaryMessage::QuerySubscription => return Err(anyhow!("Unexpected QuerySubscription")),
+        BinaryMessage::ReplySubscription(count) => {
+            tracing::info!("Active subscriptions: {}", count)
+        }
+    }
+    Ok(())
 }
