@@ -82,6 +82,13 @@ impl Client {
                                 }
                                 Ok(Message::Ping(_)) => {} // tungstenite handles Pong already
                                 Ok(Message::Close(c)) => tracing::warn!("Server closed connection: {:?}", c), // ToDo: do something
+                                Ok(Message::Binary(msg)) => {
+                                    sink.as_ref().map(|ext_tx| {
+                                        if ext_tx.send(RelayMessage::Binary(msg)).is_err() {
+                                            tracing::error!("Cannot send binary to relay channel");
+                                        }
+                                    });
+                                }
                                 Ok(_) => tracing::warn!("Unsupported message"),
                                 Err(err) => tracing::error!("Do something about {}", err), // ToDo: handle error
                             }
@@ -246,7 +253,7 @@ impl Client {
     /// to send their own binary format
     pub async fn send_binary(&self, message: Message) -> Result<()> {
         match &message {
-            Message::Binary(request) => {
+            Message::Binary(_) => {
                 let int_tx = self._get_send_channel()?;
                 int_tx.send(ClientCommand::Binary(message))?;
                 Ok(())

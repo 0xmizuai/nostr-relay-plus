@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use nostr_plus_common::binary_protocol::BinaryMessage;
 use nostr_surreal_db::message::{events::Event, filter::Filter, notice::Notice};
 use nostr_plus_common::wire::EventOnWire;
 
@@ -100,4 +101,13 @@ impl LocalState {
         Ok(())
     }
 
+    pub fn handle_binary_message(&self, msg: &[u8]) -> Result<Vec<u8>> {
+        let binary_message = BinaryMessage::from_bytes(msg)?;
+        match binary_message {
+            BinaryMessage::QuerySubscription => {
+                Ok(BinaryMessage::ReplySubscription(self.subscriptions.len() as u8).to_bytes())
+            }
+            BinaryMessage::ReplySubscription(_) => Err(anyhow!("Unexpected ReplySubscription")),
+        }
+    }
 }

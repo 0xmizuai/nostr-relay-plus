@@ -61,7 +61,7 @@ impl LocalState {
         }
 
         // check if there is room for another subscription.
-        if self.subscriptions.len() >= self.max_subs {
+        if self.subscriptions.len() >= self.max_subs as usize {
             return Err(anyhow!("SubMaxExceededError for {}", self.client_ip_addr));
         }
         // add subscription
