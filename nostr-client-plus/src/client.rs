@@ -8,9 +8,9 @@ use nostr_crypto::sender_signer::SenderSigner;
 use nostr_crypto::signer::Signer;
 use nostr_plus_common::relay_message::RelayMessage;
 use nostr_plus_common::sender::Sender as NostrSender;
-use nostr_plus_common::types::{Bytes32, SubscriptionId};
+use nostr_plus_common::types::SubscriptionId;
 use std::collections::HashMap;
-use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::time::{sleep, Duration};
 use tokio_tungstenite::tungstenite::Message;
 

@@ -44,7 +44,8 @@ const STALE_TIME: Duration = Duration::from_secs(300);
 lazy_static! {
     pub static ref REGISTRY: Registry = Registry::default();
     pub static ref ASSIGNED_JOBS: IntCounter =
-        IntCounter::new("assigned_jobs_total", "Total Assigned Jobs").expect("Failed to create assigned_jobs");
+        IntCounter::new("assigned_jobs_total", "Total Assigned Jobs")
+            .expect("Failed to create assigned_jobs");
     pub static ref CACHED_JOBS: IntGauge =
         IntGauge::new("cached_jobs", "Cached Jobs").expect("Failed to create cached_jobs");
     pub static ref WORKERS_ONLINE: IntGauge =
@@ -452,7 +453,7 @@ fn register_metrics() {
 }
 
 async fn is_too_early(sender: &Sender, ctx: &mut Context) -> bool {
-    let mut assigned_senders = ctx.assigned_senders.lock().await;
+    let assigned_senders = ctx.assigned_senders.lock().await;
     if let Some(last_assigned) = assigned_senders.get(sender) {
         let current_time = Instant::now();
         if current_time.duration_since(*last_assigned) >= COOL_DOWN_PERIOD {

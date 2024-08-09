@@ -32,7 +32,8 @@ const MONITORING_INTERVAL: Duration = Duration::from_secs(120);
 lazy_static! {
     pub static ref REGISTRY: Registry = Registry::default();
     pub static ref FINISHED_JOBS: IntCounter =
-        IntCounter::new("finished_jobs_total", "Total Finished Jobs").expect("Failed to create finished_jobs");
+        IntCounter::new("finished_jobs_total", "Total Finished Jobs")
+            .expect("Failed to create finished_jobs");
 }
 
 #[tokio::main]
