@@ -1,5 +1,5 @@
 use crate::crypto::CryptoHash;
-use nostr_plus_common::types::Timestamp;
+use nostr_plus_common::{types::Timestamp, wire::EventOnWire};
 use serde::{Deserialize, Serialize};
 use strum_macros::{AsRefStr, EnumString};
 
@@ -47,6 +47,7 @@ pub struct ResultPayload {
     pub header: PayloadHeader,
     pub output: String,
     pub version: String,
+    pub assign_event: EventOnWire,
 }
 
 #[derive(AsRefStr, EnumString, PartialEq)]

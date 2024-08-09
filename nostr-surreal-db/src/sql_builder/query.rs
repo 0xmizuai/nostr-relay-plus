@@ -1,5 +1,5 @@
-use serde_json::json;
 use nostr_plus_common::types::Bytes32;
+use serde_json::json;
 
 use crate::message::events::Event;
 use crate::message::filter::Filter;
@@ -9,7 +9,8 @@ use super::SqlBuilder;
 
 impl SqlBuilder {
     pub fn write_event(&mut self, event: &Event) -> &mut Self {
-        let sql = format!("
+        let sql = format!(
+            "
             CREATE {NOSTR_EVENTS_TABLE} SET
                 id = '{}',
                 sender = '{}',
@@ -21,7 +22,7 @@ impl SqlBuilder {
 
                 expieration = {},
                 content = '{}';
-        ", 
+        ",
             hex::encode(&event.id),
             hex::encode(&event.sender.to_bytes()),
             hex::encode(&event.sig),
@@ -32,24 +33,30 @@ impl SqlBuilder {
                 Some(expiration) => expiration.to_string(),
                 None => "NULL".to_string(),
             },
-            event.content,
+            // Fix disgusting escape character bug in surrealdb
+            // https://github.com/surrealdb/surrealdb/issues/90
+            // caused by nested json object in content string
+            event.content.replace("\\\"", "\\\'"),
         );
+
+        // println!("sql {}", sql);
 
         self.push_sql(sql);
         self
     }
 
     pub fn write_tags(&mut self, event_id: &Bytes32, tags: &Tags) -> &mut Self {
-        
         for tag in tags {
-            let sql = format!("
+            let sql = format!(
+                "
                 CREATE {NOSTR_TAGS_TABLE} SET
                     event_id = '{NOSTR_EVENTS_TABLE}:{}',
                     tag_name = '{}',
                     tag_value = '{}';
             ",
                 hex::encode(event_id),
-                tag.0, tag.1,
+                tag.0,
+                tag.1,
             );
 
             self.push_sql(sql);
@@ -59,7 +66,8 @@ impl SqlBuilder {
     }
 
     pub fn update_event(&mut self, event: &Event) -> &mut Self {
-        let sql = format!("
+        let sql = format!(
+            "
             UPDATE {NOSTR_EVENTS_TABLE} SET
                 id = '{}',
                 sender = '{}',
@@ -90,16 +98,20 @@ impl SqlBuilder {
     }
 
     pub fn delete_event(&mut self, event_id: &str) -> &mut Self {
-        let sql = format!("
+        let sql = format!(
+            "
             DELETE FROM {NOSTR_EVENTS_TABLE} WHERE id = '{}';
-        ", event_id);
+        ",
+            event_id
+        );
 
         self.push_sql(sql);
         self
     }
 
     pub fn get_event_by_author_kinds(&mut self, author: &Bytes32, kind: u16) -> &mut Self {
-        let sql = format!("
+        let sql = format!(
+            "
             SELECT * FROM {NOSTR_EVENTS_TABLE} WHERE
                 sender = '{}' AND
                 kind = {};
@@ -113,9 +125,12 @@ impl SqlBuilder {
     }
 
     pub fn get_event_by_id(&mut self, event_id: &Bytes32) -> &mut Self {
-        let sql = format!("
+        let sql = format!(
+            "
             SELECT * FROM {NOSTR_EVENTS_TABLE} WHERE id = '{}';
-        ", hex::encode(event_id));
+        ",
+            hex::encode(event_id)
+        );
 
         self.push_sql(sql);
         self
@@ -159,7 +174,7 @@ impl SqlBuilder {
             if filter.since.is_some() {
                 time_query.push(format!("created_at > {}", filter.since.unwrap()));
             }
-    
+
             if filter.until.is_some() {
                 time_query.push(format!("created_at < {}", filter.until.unwrap()));
             }
@@ -168,11 +183,11 @@ impl SqlBuilder {
                 0 => "created_at > 0".to_string(),
                 1 => time_query[0].to_string(),
                 2 => format!("({} AND {})", time_query[0], time_query[1]),
-                _ => unreachable!()
+                _ => unreachable!(),
             }
         };
 
-        filter_query.push(the_time_query);   
+        filter_query.push(the_time_query);
 
         filter_query
     }
@@ -190,7 +205,8 @@ impl SqlBuilder {
         }
 
         if all_filter_queries.len() > 0 {
-            let all_filter_query = all_filter_queries.iter()
+            let all_filter_query = all_filter_queries
+                .iter()
                 .map(|q| format!("({q})"))
                 .collect::<Vec<String>>()
                 .join(" OR ");
@@ -203,7 +219,6 @@ impl SqlBuilder {
         self
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -234,12 +249,8 @@ mod tests {
 
         println!("{:?}", filter);
 
-
-        let sql = SqlBuilder::new()
-            .get_events_by_filters(&[filter])
-            .build();
+        let sql = SqlBuilder::new().get_events_by_filters(&[filter]).build();
 
         println!("SQL {sql}");
     }
-
 }

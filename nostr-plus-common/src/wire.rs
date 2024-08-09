@@ -1,29 +1,29 @@
 use std::collections::HashMap;
 
+use crate::types::Bytes32;
 use anyhow::{anyhow, Result};
 use nostr_crypto::hash::sha256_hash_digests;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use crate::types::Bytes32;
 
 use crate::types::Timestamp;
 
 use super::sender::Sender;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventOnWire {
     #[serde(with = "hex::serde")]
     pub id: Bytes32,
-    pub sender: Sender,    
+    pub sender: Sender,
     pub created_at: Timestamp,
     pub kind: u16,
-    
+
     #[serde(default)]
     pub tags: Vec<Vec<String>>,
-    
+
     #[serde(default)]
     pub content: String,
-    
+
     #[serde(with = "hex::serde")]
     pub sig: Vec<u8>,
 }
@@ -31,7 +31,7 @@ pub struct EventOnWire {
 impl EventOnWire {
     pub fn to_id_hash(&self) -> Bytes32 {
         let json = json!([
-            0, 
+            0,
             hex::encode(self.sender.to_bytes()),
             self.created_at,
             self.kind,
@@ -69,7 +69,7 @@ pub struct FilterOnWire {
     pub ids: Vec<_HexString>,
     pub authors: Vec<Sender>,
     pub kinds: Vec<u16>,
-    
+
     pub since: Option<u64>,
     pub until: Option<u64>,
     pub limit: Option<u64>,
@@ -78,9 +78,7 @@ pub struct FilterOnWire {
     pub tags: HashMap<String, Value>,
 }
 
-pub fn parse_filter_tags(raw_tags: HashMap<String, Value>) -> Result<
-    HashMap< String, Vec<String> > 
-> {
+pub fn parse_filter_tags(raw_tags: HashMap<String, Value>) -> Result<HashMap<String, Vec<String>>> {
     let mut tags = HashMap::new();
     for (raw_key, raw_value) in raw_tags {
         if let Some(key) = raw_key.strip_prefix('#') {
