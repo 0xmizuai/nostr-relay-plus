@@ -5,6 +5,7 @@ use mongodb::{Client as DbClient, Collection};
 use nostr_client_plus::__private::config::{load_config, AggregatorConfig};
 use nostr_client_plus::__private::metrics::get_metrics_app;
 use nostr_client_plus::client::Client;
+use nostr_client_plus::crypto::CryptoHash;
 use nostr_client_plus::db::{AssignedJobs, FinishedJobs};
 use nostr_client_plus::job_protocol::{Kind, ResultPayload};
 use nostr_client_plus::request::{Filter, Request};
@@ -123,29 +124,18 @@ async fn run() -> Result<()> {
                 RelayMessage::Event(ev) => match ev.event.kind {
                     // Save 6002 event, for later 6003 verify
                     Kind::ASSIGN => {
-                        // Check repeated
-                        let exist = assigned_jobs_collection
-                            .find_one(doc! { "assign_event_id": hex::encode(ev.event.id) }, None)
-                            .await
-                            .unwrap_or(None);
-
-                        if let Some(_) = exist {
-                            tracing::error!(
-                                "Repeated assign_event_id when save assigned_jobs, skip"
-                            );
-                            continue;
-                        }
-
-                        let assign_event_id = hex::encode(ev.event.id);
+                        let assign_event_id = CryptoHash::new(ev.event.id);
                         let db_entry = AssignedJobs {
-                            assign_event_id: assign_event_id.clone(),
+                            _id: CryptoHash::new(ev.event.id),
                             assign_event: ev.event.clone(),
                         };
                         // Save assign event to db
                         match assigned_jobs_collection.insert_one(db_entry, None).await {
                             Ok(_) => {
-                                tracing::debug!("Write assigned job to db: {:?}", assign_event_id);
-                                FINISHED_JOBS.inc();
+                                tracing::debug!(
+                                    "Write assigned job to db: {:?}",
+                                    assign_event_id.hash()
+                                );
                             }
                             Err(err) => {
                                 tracing::error!("Cannot write assigned job to db: {}", err);
@@ -156,21 +146,43 @@ async fn run() -> Result<()> {
                         if let Ok(payload) = get_result_payload(&ev) {
                             if let Ok(Some(job_id)) = get_single_tag_entry('e', &ev.event.tags) {
                                 // Get saved assign event from db
-                                let assign_event = assigned_jobs_collection
-                                    .find_one(doc! { "assign_event_id": job_id.clone() }, None)
+                                let assigned_job = assigned_jobs_collection
+                                    .find_one(doc! { "_id": job_id.clone() }, None)
                                     .await
                                     .unwrap_or(None);
 
-                                if let None = assign_event {
+                                if let None = assigned_job {
                                     tracing::error!("Can't find assign_event from job_id");
                                     continue;
                                 }
 
+                                let assign_event = assigned_job.unwrap().assign_event;
+
+                                // Check assigner in whitelist
+                                if !assigner_whitelist.contains(&assign_event.sender) {
+                                    tracing::error!("Assigner not in whitelist");
+                                    continue;
+                                }
+
+                                // Check Result event validation
+                                let validate_result =
+                                    validate_result_event(ev.event.clone(), assign_event.clone());
+
+                                match validate_result {
+                                    Err(msg) => {
+                                        tracing::error!("Validate error {}", msg.to_string());
+                                        continue;
+                                    }
+                                    Ok(res) => {
+                                        if !res {
+                                            tracing::error!("Validate Result Event Failed");
+                                            continue;
+                                        }
+                                    }
+                                }
+
                                 let sender = ev.event.sender;
-                                let value = (
-                                    job_id,
-                                    (sender, payload, assign_event.unwrap().assign_event),
-                                );
+                                let value = (job_id, (sender, payload, assign_event));
                                 if aggr_tx.send(value).await.is_err() {
                                     tracing::error!("Cannot send to aggregator task");
                                 }
@@ -220,73 +232,6 @@ async fn run() -> Result<()> {
 
             if new_payload.version != supported_version {
                 tracing::error!("Version mismatch");
-                continue;
-            }
-
-            // Check pow result, Sha512(raw_data_id + output) is 00000....
-            let mut hex_raw_data_id = hex::encode(new_payload.header.raw_data_id.hash());
-            hex_raw_data_id.push_str(&new_payload.output);
-            let mut hasher = Sha512::new();
-            hasher.update(hex_raw_data_id);
-            let result = hasher.finalize();
-            let hex_esult = hex::encode(result);
-            let pow_result_valid = hex_esult.starts_with("00000");
-            if !pow_result_valid {
-                tracing::error!("Pow result invalid");
-                continue;
-            }
-
-            // Check assigner in whitelist
-            if !assigner_whitelist.contains(&assign_event.sender) {
-                tracing::error!("Assigner not in whitelist");
-                continue;
-            }
-
-            if let Ok(Some(assignee)) = get_single_tag_entry('p', &assign_event.tags) {
-                // Check assignee is Result sender
-                if let Ok(assignee_hex) = hex::decode(assignee) {
-                    if let Some(assignee_account) = Sender::from_bytes(&assignee_hex) {
-                        if assignee_account != sender {
-                            tracing::error!("Assignee mismatch");
-                            continue;
-                        }
-
-                        // Verify assign_event signature
-                        let expected_hash = assign_event.to_id_hash();
-                        if expected_hash != assign_event.id {
-                            tracing::error!("Invalid assign_event id");
-                            continue;
-                        }
-                        if let Err(_) = assign_event
-                            .sender
-                            .validate_signature(expected_hash, &assign_event.sig)
-                        {
-                            tracing::error!("Invalid assign_event sig");
-                            continue;
-                        }
-                    } else {
-                        tracing::error!("Invalid p tag in assign_event");
-                        continue;
-                    }
-                } else {
-                    tracing::error!("Invalid p tag in assign_event");
-                    continue;
-                }
-            } else {
-                tracing::error!("Missing p tag in assign_event");
-                continue;
-            }
-
-            // Check repeated assign event id
-            let exist = collection
-                .find_one(
-                    doc! { "assign_event_id": hex::encode(&assign_event.id) },
-                    None,
-                )
-                .await
-                .unwrap_or(None);
-            if let Some(_) = exist {
-                tracing::error!("Repeated assign_event_id when save finished_jobs, skip");
                 continue;
             }
 
@@ -401,4 +346,47 @@ fn register_metrics() {
     REGISTRY
         .register(Box::new(FINISHED_JOBS.clone()))
         .expect("Cannot register finished_jobs");
+}
+
+fn validate_result_event(event: EventOnWire, assign_event: EventOnWire) -> Result<bool> {
+    let payload: ResultPayload = serde_json::from_str(event.content.as_str())?;
+    let job_type = payload.header.job_type;
+    // POW event check
+    if job_type == 0 {
+        // Check assignee is Result Sender
+        if let Ok(Some(assignee)) = get_single_tag_entry('p', &assign_event.tags) {
+            if let Ok(assignee_hex) = hex::decode(assignee) {
+                if let Some(assignee_account) = Sender::from_bytes(&assignee_hex) {
+                    if assignee_account != event.sender {
+                        tracing::error!("Assignee mismatch");
+                        return Ok(false);
+                    }
+                } else {
+                    tracing::error!("Invalid p tag in assign_event");
+                    return Ok(false);
+                }
+            } else {
+                tracing::error!("Invalid p tag in assign_event");
+                return Ok(false);
+            }
+        } else {
+            tracing::error!("Missing p tag in assign_event");
+            return Ok(false);
+        }
+
+        // Check pow result, Sha512(raw_data_id + output) is 00000....
+        let mut hex_raw_data_id = hex::encode(payload.header.raw_data_id.hash());
+        hex_raw_data_id.push_str(&payload.output);
+        let mut hasher = Sha512::new();
+        hasher.update(hex_raw_data_id);
+        let result = hasher.finalize();
+        let hex_esult = hex::encode(result);
+        let pow_result_valid = hex_esult.starts_with("00000");
+        if !pow_result_valid {
+            tracing::error!("Pow result invalid");
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
 }

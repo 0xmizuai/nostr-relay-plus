@@ -26,7 +26,7 @@ pub struct RawDataEntry {
 
 #[derive(Serialize, Deserialize)]
 pub struct AssignedJobs {
-    pub assign_event_id: String,
+    pub _id: CryptoHash,
     pub assign_event: EventOnWire,
 }
 
