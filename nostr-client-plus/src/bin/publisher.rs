@@ -1,3 +1,4 @@
+use anyhow::Result;
 use mongodb::bson::from_document;
 use mongodb::{Client as DbClient, Collection};
 use nostr_client_plus::client::Client;
@@ -7,18 +8,34 @@ use nostr_client_plus::job_protocol::{JobType, Kind, NewJobPayload, PayloadHeade
 use nostr_crypto::eoa_signer::EoaSigner;
 use nostr_crypto::sender_signer::SenderSigner;
 use nostr_plus_common::relay_message::RelayMessage;
+use std::convert::TryInto;
 use std::time::Duration;
 use tokio::time::{interval, Instant};
 
+mod utils;
+use crate::utils::get_queued_jobs;
+
 const TIMEOUT: Duration = Duration::from_secs(10);
+const LOW_VAL_JOBS: usize = 5_000;
 
 #[tokio::main]
 async fn main() {
+    if let Err(err) = run().await {
+        eprint!("{}", err);
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> Result<()> {
     // Define needed env variables
     dotenv::dotenv().ok();
     let db_url = std::env::var("MONGO_URL").expect("MONGO_URL is not set");
     let relay_url = std::env::var("RELAY_URL").unwrap_or("ws://127.0.0.1:3033".to_string());
-    let raw_private_key = std::env::var("PUBLISHER_PRIVATE_KEY").unwrap();
+    let raw_private_key =
+        std::env::var("PUBLISHER_PRIVATE_KEY").expect("Missing PUBLISHER_PRIVATE_KEY");
+    let metrics_server = std::env::var("PROMETHEUS_URL").expect("Missing PROMETHEUS_URL");
+    let low_val_jobs = std::env::var("JOBS_THRESHOLD").unwrap_or(LOW_VAL_JOBS.to_string());
+    let low_val_jobs: usize = low_val_jobs.parse()?;
 
     // Command line parsing
     let args: Vec<String> = std::env::args().collect();
@@ -27,9 +44,16 @@ async fn main() {
         2 => args[1].parse().expect("Invalid number"),
         _ => {
             eprintln!("Too many arguments");
-            return;
+            return Ok(());
         }
     };
+
+    // Check if jobs are low and, if not, exit
+    let queued_jobs = get_queued_jobs(metrics_server.as_str(), "cached_jobs").await?;
+    if queued_jobs > low_val_jobs {
+        eprintln!("Enough jobs in the queue");
+        return Ok(());
+    }
 
     // Configure DB from args
     let db = DbClient::with_uri_str(db_url)
@@ -39,15 +63,12 @@ async fn main() {
     let collection: Collection<RawDataEntry> = db.collection("raw_data");
 
     // Private key
-    let private_key = hex::decode(raw_private_key).unwrap().try_into().unwrap();
+    let private_key = hex::decode(raw_private_key)?.try_into().unwrap();
 
     // Create client
     let signer = EoaSigner::from_bytes(&private_key);
     let mut client = Client::new(SenderSigner::Eoa(signer));
-    let mut relay_channel = client
-        .connect_with_channel(relay_url.as_str())
-        .await
-        .unwrap();
+    let mut relay_channel = client.connect_with_channel(relay_url.as_str()).await?;
 
     // start a listener just for OK messages
     let mut timeout_timer = interval(TIMEOUT);
@@ -80,16 +101,14 @@ async fn main() {
 
     let timestamp_now = chrono::Utc::now().timestamp() as u64;
 
-    let entries = left_anti_join(&collection, "finished_jobs", limit_publish)
-        .await
-        .unwrap();
+    let entries = left_anti_join(&collection, "finished_jobs", limit_publish).await?;
 
     // Get type job id and name
     let job_type = JobType::Classification.job_type();
     let job_type_str = JobType::Classification.as_ref();
 
     for entry in entries {
-        let entry: RawDataEntry = from_document(entry).unwrap();
+        let entry: RawDataEntry = from_document(entry)?;
         println!("Entry {}", entry._id.to_string());
         let header = PayloadHeader {
             job_type,
@@ -113,6 +132,7 @@ async fn main() {
         }
     }
 
-    listener_handle.await.unwrap();
+    listener_handle.await?;
     println!("Done");
+    Ok(())
 }

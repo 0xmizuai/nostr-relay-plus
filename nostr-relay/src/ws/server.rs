@@ -81,11 +81,18 @@ pub async fn handle_websocket_connection(
                     // Reset activity
                     last_activity = Instant::now();
                 }
-                Some(Ok(Message::Binary(d))) => {
+                Some(Ok(Message::Binary(msg))) => {
                     // Reset activity
                     last_activity = Instant::now();
 
-                    tracing::trace!(">>> {} sent {} bytes: {:?}", who, d.len(), d);
+                    match local_state.handle_binary_message(msg.as_ref()) {
+                        Ok(msg) => {
+                            if ws_sender.send(Message::Binary(msg)).await.is_err() {
+                                tracing::error!("Cannot send binary msg");
+                            }
+                        }
+                        Err(err) => tracing::warn!("{}", err),
+                    }
                 },
                 Some(Err(e)) => tracing::error!("While receiving from websocket: {}", e),
                 None => {
