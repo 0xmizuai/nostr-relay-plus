@@ -142,7 +142,6 @@ fn get_result_event(
         header: payload.header,
         output: fake_result,
         version: "v0.0.1".to_string(),
-        assign_event: assign_event,
     };
     let content = match serde_json::to_string(&result) {
         Ok(val) => val,

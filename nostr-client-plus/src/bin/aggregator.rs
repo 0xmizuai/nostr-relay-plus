@@ -5,7 +5,7 @@ use mongodb::{Client as DbClient, Collection};
 use nostr_client_plus::__private::config::{load_config, AggregatorConfig};
 use nostr_client_plus::__private::metrics::get_metrics_app;
 use nostr_client_plus::client::Client;
-use nostr_client_plus::db::FinishedJobs;
+use nostr_client_plus::db::{AssignedJobs, FinishedJobs};
 use nostr_client_plus::job_protocol::{Kind, ResultPayload};
 use nostr_client_plus::request::{Filter, Request};
 use nostr_crypto::eoa_signer::EoaSigner;
@@ -15,6 +15,7 @@ use nostr_plus_common::relay_message::RelayMessage;
 use nostr_plus_common::sender::Sender;
 use nostr_plus_common::wire::EventOnWire;
 use prometheus::{IntCounter, Registry};
+use sha2::{Digest, Sha512};
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
@@ -95,6 +96,8 @@ async fn run() -> Result<()> {
         .database("mine");
     let collection: Collection<FinishedJobs> = db.collection("finished_jobs");
 
+    let assigned_jobs_collection: Collection<AssignedJobs> = db.collection("assigned_jobs");
+
     // Get a silly private key based on a string identifying the service.
     let private_key = get_private_key_from_name("Aggregator").unwrap();
 
@@ -118,12 +121,56 @@ async fn run() -> Result<()> {
         while let Some(msg) = relay_channel.recv().await {
             match msg {
                 RelayMessage::Event(ev) => match ev.event.kind {
+                    // Save 6002 event, for later 6003 verify
+                    Kind::ASSIGN => {
+                        // Check repeated
+                        let exist = assigned_jobs_collection
+                            .find_one(doc! { "assign_event_id": hex::encode(ev.event.id) }, None)
+                            .await
+                            .unwrap_or(None);
+
+                        if let Some(_) = exist {
+                            tracing::error!(
+                                "Repeated assign_event_id when save assigned_jobs, skip"
+                            );
+                            continue;
+                        }
+
+                        let assign_event_id = hex::encode(ev.event.id);
+                        let db_entry = AssignedJobs {
+                            assign_event_id: assign_event_id.clone(),
+                            assign_event: ev.event.clone(),
+                        };
+                        // Save assign event to db
+                        match assigned_jobs_collection.insert_one(db_entry, None).await {
+                            Ok(_) => {
+                                tracing::debug!("Write assigned job to db: {:?}", assign_event_id);
+                                FINISHED_JOBS.inc();
+                            }
+                            Err(err) => {
+                                tracing::error!("Cannot write assigned job to db: {}", err);
+                            }
+                        }
+                    }
                     Kind::RESULT => {
                         if let Ok(payload) = get_result_payload(&ev) {
                             if let Ok(Some(job_id)) = get_single_tag_entry('e', &ev.event.tags) {
+                                // Get saved assign event from db
+                                let assign_event = assigned_jobs_collection
+                                    .find_one(doc! { "assign_event_id": job_id.clone() }, None)
+                                    .await
+                                    .unwrap_or(None);
+
+                                if let None = assign_event {
+                                    tracing::error!("Can't find assign_event from job_id");
+                                    continue;
+                                }
+
                                 let sender = ev.event.sender;
-                                let assign_event = payload.assign_event.clone();
-                                let value = (job_id, (sender, payload, assign_event));
+                                let value = (
+                                    job_id,
+                                    (sender, payload, assign_event.unwrap().assign_event),
+                                );
                                 if aggr_tx.send(value).await.is_err() {
                                     tracing::error!("Cannot send to aggregator task");
                                 }
@@ -176,9 +223,22 @@ async fn run() -> Result<()> {
                 continue;
             }
 
+            // Check pow result, Sha512(raw_data_id + output) is 00000....
+            let mut hex_raw_data_id = hex::encode(new_payload.header.raw_data_id.hash());
+            hex_raw_data_id.push_str(&new_payload.output);
+            let mut hasher = Sha512::new();
+            hasher.update(hex_raw_data_id);
+            let result = hasher.finalize();
+            let hex_esult = hex::encode(result);
+            let pow_result_valid = hex_esult.starts_with("00000");
+            if !pow_result_valid {
+                tracing::error!("Pow result invalid");
+                continue;
+            }
+
             // Check assigner in whitelist
             if !assigner_whitelist.contains(&assign_event.sender) {
-                tracing::error!("assigner not in whitelist");
+                tracing::error!("Assigner not in whitelist");
                 continue;
             }
 
@@ -187,33 +247,33 @@ async fn run() -> Result<()> {
                 if let Ok(assignee_hex) = hex::decode(assignee) {
                     if let Some(assignee_account) = Sender::from_bytes(&assignee_hex) {
                         if assignee_account != sender {
-                            tracing::error!("assignee mismatch");
+                            tracing::error!("Assignee mismatch");
                             continue;
                         }
 
                         // Verify assign_event signature
                         let expected_hash = assign_event.to_id_hash();
                         if expected_hash != assign_event.id {
-                            tracing::error!("invalid assign_event id");
+                            tracing::error!("Invalid assign_event id");
                             continue;
                         }
                         if let Err(_) = assign_event
                             .sender
                             .validate_signature(expected_hash, &assign_event.sig)
                         {
-                            tracing::error!("invalid assign_event sig");
+                            tracing::error!("Invalid assign_event sig");
                             continue;
                         }
                     } else {
-                        tracing::error!("invalid p tag in assign_event");
+                        tracing::error!("Invalid p tag in assign_event");
                         continue;
                     }
                 } else {
-                    tracing::error!("invalid p tag in assign_event");
+                    tracing::error!("Invalid p tag in assign_event");
                     continue;
                 }
             } else {
-                tracing::error!("missing p tag in assign_event");
+                tracing::error!("Missing p tag in assign_event");
                 continue;
             }
 
@@ -226,7 +286,7 @@ async fn run() -> Result<()> {
                 .await
                 .unwrap_or(None);
             if let Some(_) = exist {
-                tracing::error!("repeated assign_event id");
+                tracing::error!("Repeated assign_event_id when save finished_jobs, skip");
                 continue;
             }
 
@@ -313,8 +373,9 @@ async fn run() -> Result<()> {
     // Send subscription, so everything will finally start
     let sub_id = "be4788ade0000000000000000000000000000000000000000000000000001111";
     let filter = Filter {
-        kinds: vec![Kind::RESULT],
-        since: Some(chrono::Utc::now().timestamp() as u64),
+        kinds: vec![Kind::RESULT, Kind::ASSIGN],
+        // Subscribe ASSIGN events since 15 minutes ago
+        since: Some(chrono::Utc::now().timestamp() as u64 - 900),
         ..Default::default()
     };
     let req = Request::new(sub_id.to_string(), vec![filter]);

@@ -33,10 +33,7 @@ impl SqlBuilder {
                 Some(expiration) => expiration.to_string(),
                 None => "NULL".to_string(),
             },
-            // Fix disgusting escape character bug in surrealdb
-            // https://github.com/surrealdb/surrealdb/issues/90
-            // caused by nested json object in content string
-            event.content.replace("\\\"", "\\\'"),
+            event.content,
         );
 
         // println!("sql {}", sql);
