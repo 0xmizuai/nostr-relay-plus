@@ -36,8 +36,6 @@ impl SqlBuilder {
             event.content,
         );
 
-        // println!("sql {}", sql);
-
         self.push_sql(sql);
         self
     }
