@@ -77,9 +77,13 @@ impl LocalState {
     /// Remove the subscription for this connection.
     pub fn unsubscribe(&mut self, c: &str) {
         // TODO: return notice if subscription did not exist.
-        self.subscriptions.remove(&c.to_owned());
-        tracing::trace!(
-            "removed subscription, currently have {} active subs (cid: {})",
+        if self.subscriptions.remove(&c.to_owned()).is_none() {
+            tracing::debug!("Subscription {} does not exist", c);
+        } else {
+            tracing::debug!("Removed subscription {}", c);
+        }
+        tracing::debug!(
+            "Currently have {} active subs (cid: {})",
             self.subscriptions.len(),
             self.client_ip_addr,
         );

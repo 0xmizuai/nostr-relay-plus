@@ -18,6 +18,7 @@ pub async fn handle_websocket_connection(
     who: SocketAddr,
     global_state: GlobalState,
 ) {
+    tracing::info!("New WS connection from {}", who);
     let (mut ws_sender, mut ws_receiver) = socket.split();
 
     // 1. spawn the local connection state 
@@ -137,6 +138,6 @@ pub async fn handle_websocket_connection(
                 let _ = ws_sender.send(msg).await;
             }
         }
-        tracing::warn!("Stopped serving connection for {}", who);
     }
+    tracing::warn!("Stopped serving connection for {}", who);
 }
