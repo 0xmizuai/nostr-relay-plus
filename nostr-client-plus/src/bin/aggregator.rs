@@ -153,25 +153,6 @@ async fn run() -> Result<()> {
                                 }
                                 let assign_event = assigned_event.unwrap();
 
-                                // Check assigner in whitelist
-                                let sender_bytes = hex::decode(assign_event.sender.clone());
-                                if let Err(err) = sender_bytes {
-                                    tracing::error!(
-                                        "Can't get bytes from assign_event sender, {}",
-                                        err
-                                    );
-                                    continue;
-                                }
-                                let sender = Sender::from_bytes(&sender_bytes.unwrap());
-                                if let None = sender {
-                                    tracing::error!("Can't get sender from assign_event");
-                                    continue;
-                                }
-                                if !assigner_whitelist.contains(&sender.unwrap()) {
-                                    tracing::error!("Assigner not in whitelist");
-                                    continue;
-                                }
-
                                 // Check Result event validation
                                 let validate_result =
                                     validate_result_event(ev.event.clone(), assign_event.clone());
@@ -325,13 +306,20 @@ async fn run() -> Result<()> {
 
     // Send subscription, so everything will finally start
     let sub_id = "be4788ade0000000000000000000000000000000000000000000000000001111";
-    let filter = Filter {
-        kinds: vec![Kind::RESULT, Kind::ASSIGN],
+    let result_filter = Filter {
+        kinds: vec![Kind::RESULT],
         // Subscribe ASSIGN events since 15 minutes ago
         since: Some(chrono::Utc::now().timestamp() as u64 - 900),
         ..Default::default()
     };
-    let req = Request::new(sub_id.to_string(), vec![filter]);
+    let assign_filter = Filter {
+        kinds: vec![Kind::ASSIGN],
+        authors: assigner_whitelist.into_iter().collect(),
+        // Subscribe ASSIGN events since 15 minutes ago
+        since: Some(chrono::Utc::now().timestamp() as u64 - 900),
+        ..Default::default()
+    };
+    let req = Request::new(sub_id.to_string(), vec![result_filter, assign_filter]);
     client
         .subscribe(req, Some(120)) // in case of reconnect, get messages 2 mins old
         .await
