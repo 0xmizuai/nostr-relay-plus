@@ -5,9 +5,9 @@ use mongodb::{Client as DbClient, Collection};
 use nostr_client_plus::__private::config::{load_config, AggregatorConfig};
 use nostr_client_plus::__private::metrics::get_metrics_app;
 use nostr_client_plus::client::Client;
-use nostr_client_plus::crypto::CryptoHash;
-use nostr_client_plus::db::{AssignedJobs, FinishedJobs};
+use nostr_client_plus::db::FinishedJobs;
 use nostr_client_plus::job_protocol::{Kind, ResultPayload};
+use nostr_client_plus::redis::RedisEventOnWire;
 use nostr_client_plus::request::{Filter, Request};
 use nostr_crypto::eoa_signer::EoaSigner;
 use nostr_crypto::sender_signer::SenderSigner;
@@ -16,6 +16,7 @@ use nostr_plus_common::relay_message::RelayMessage;
 use nostr_plus_common::sender::Sender;
 use nostr_plus_common::wire::EventOnWire;
 use prometheus::{IntCounter, Registry};
+use redis::{Commands, Connection, RedisError};
 use sha2::{Digest, Sha512};
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap};
@@ -26,7 +27,7 @@ use tracing_subscriber::FmtSubscriber;
 mod utils;
 use crate::utils::{get_private_key_from_name, get_single_tag_entry};
 
-type AggrMessage = (String, (Sender, ResultPayload, EventOnWire));
+type AggrMessage = (String, (Sender, ResultPayload, String));
 
 lazy_static! {
     pub static ref REGISTRY: Registry = Registry::default();
@@ -94,10 +95,13 @@ async fn run() -> Result<()> {
     let db = DbClient::with_uri_str(db_url)
         .await
         .expect("Cannot connect to db")
-        .database("mine");
+        .database("mine_test");
     let collection: Collection<FinishedJobs> = db.collection("finished_jobs");
 
-    let assigned_jobs_collection: Collection<AssignedJobs> = db.collection("assigned_jobs");
+    // Configure Redis
+    let redis_url = std::env::var("REDIS_URL").expect("REDIS_URL is not set");
+    let redis_client = redis::Client::open(redis_url)?;
+    let mut redis_con = redis_client.get_connection()?;
 
     // Get a silly private key based on a string identifying the service.
     let private_key = get_private_key_from_name("Aggregator").unwrap();
@@ -124,42 +128,46 @@ async fn run() -> Result<()> {
                 RelayMessage::Event(ev) => match ev.event.kind {
                     // Save 6002 event, for later 6003 verify
                     Kind::ASSIGN => {
-                        let assign_event_id = CryptoHash::new(ev.event.id);
-                        let db_entry = AssignedJobs {
-                            _id: CryptoHash::new(ev.event.id),
-                            assign_event: ev.event.clone(),
-                        };
-                        // Save assign event to db
-                        match assigned_jobs_collection.insert_one(db_entry, None).await {
+                        let res = save_event_to_redis(&mut redis_con, ev.event.clone());
+                        match res {
                             Ok(_) => {
                                 tracing::debug!(
-                                    "Write assigned job to db: {:?}",
-                                    assign_event_id.hash()
+                                    "Write assigned job to redis: {:?}",
+                                    hex::encode(ev.event.id)
                                 );
                             }
                             Err(err) => {
-                                tracing::error!("Cannot write assigned job to db: {}", err);
+                                tracing::error!("Cannot write assigned job to redis: {}", err);
                             }
                         }
                     }
                     Kind::RESULT => {
                         if let Ok(payload) = get_result_payload(&ev) {
                             if let Ok(Some(job_id)) = get_single_tag_entry('e', &ev.event.tags) {
-                                // Get saved assign event from db
-                                let assigned_job = assigned_jobs_collection
-                                    .find_one(doc! { "_id": job_id.clone() }, None)
-                                    .await
-                                    .unwrap_or(None);
-
-                                if let None = assigned_job {
-                                    tracing::error!("Can't find assign_event from job_id");
+                                // Get saved assign event from redis
+                                let assigned_event: Result<RedisEventOnWire, RedisError> =
+                                    redis_con.get(job_id.clone());
+                                if let Err(err) = assigned_event {
+                                    tracing::error!("Can't find assign_event from job_id, {}", err);
                                     continue;
                                 }
-
-                                let assign_event = assigned_job.unwrap().assign_event;
+                                let assign_event = assigned_event.unwrap();
 
                                 // Check assigner in whitelist
-                                if !assigner_whitelist.contains(&assign_event.sender) {
+                                let sender_bytes = hex::decode(assign_event.sender.clone());
+                                if let Err(err) = sender_bytes {
+                                    tracing::error!(
+                                        "Can't get bytes from assign_event sender, {}",
+                                        err
+                                    );
+                                    continue;
+                                }
+                                let sender = Sender::from_bytes(&sender_bytes.unwrap());
+                                if let None = sender {
+                                    tracing::error!("Can't get sender from assign_event");
+                                    continue;
+                                }
+                                if !assigner_whitelist.contains(&sender.unwrap()) {
                                     tracing::error!("Assigner not in whitelist");
                                     continue;
                                 }
@@ -182,7 +190,7 @@ async fn run() -> Result<()> {
                                 }
 
                                 let sender = ev.event.sender;
-                                let value = (job_id, (sender, payload, assign_event));
+                                let value = (job_id, (sender, payload, assign_event.id));
                                 if aggr_tx.send(value).await.is_err() {
                                     tracing::error!("Cannot send to aggregator task");
                                 }
@@ -221,7 +229,7 @@ async fn run() -> Result<()> {
         // keep track of results for matching
         let mut aggr_book: HashMap<String, (Vec<Sender>, ResultPayload)> = HashMap::new();
 
-        while let Some((job_id, (sender, new_payload, assign_event))) = aggr_rx.recv().await {
+        while let Some((job_id, (sender, new_payload, assign_event_id))) = aggr_rx.recv().await {
             // TODO: parse JobType
             let job_type = new_payload.header.job_type;
             let n_winners = match job_type {
@@ -244,7 +252,7 @@ async fn run() -> Result<()> {
                     timestamp: chrono::Utc::now().timestamp() as u64,
                     result: new_payload.clone(),
                     job_type,
-                    assign_event_id: hex::encode(&assign_event.id),
+                    assign_event_id,
                 };
 
                 match collection.insert_one(db_entry, None).await {
@@ -293,7 +301,7 @@ async fn run() -> Result<()> {
                             timestamp: chrono::Utc::now().timestamp() as u64,
                             result: new_payload,
                             job_type,
-                            assign_event_id: hex::encode(&assign_event.id),
+                            assign_event_id,
                         };
                         match collection.insert_one(db_entry, None).await {
                             Ok(_) => {
@@ -348,7 +356,20 @@ fn register_metrics() {
         .expect("Cannot register finished_jobs");
 }
 
-fn validate_result_event(event: EventOnWire, assign_event: EventOnWire) -> Result<bool> {
+fn save_event_to_redis(redis_con: &mut Connection, event: EventOnWire) -> Result<()> {
+    let key = hex::encode(event.id);
+    let redis_event = RedisEventOnWire {
+        id: key.clone(),
+        sender: hex::encode(event.sender.to_bytes()),
+        tags: event.tags,
+        content: event.content,
+    };
+
+    redis_con.set(key.clone(), redis_event)?;
+    Ok(())
+}
+
+fn validate_result_event(event: EventOnWire, assign_event: RedisEventOnWire) -> Result<bool> {
     let payload: ResultPayload = serde_json::from_str(event.content.as_str())?;
     let job_type = payload.header.job_type;
     // POW event check

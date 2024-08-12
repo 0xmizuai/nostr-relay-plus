@@ -8,8 +8,8 @@ use mongodb::{
     options::FindOptions,
     Collection,
 };
+use nostr_plus_common::sender::Sender;
 use nostr_plus_common::types::Timestamp;
-use nostr_plus_common::{sender::Sender, wire::EventOnWire};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -22,12 +22,6 @@ pub struct RawDataEntry {
     pub content_checksum: CryptoHash, // data content checksum
     pub bytes_size: usize,            // source data metadata
     pub r2_key: String,               // Key to retrieve the content from R2
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct AssignedJobs {
-    pub _id: CryptoHash,
-    pub assign_event: EventOnWire,
 }
 
 #[derive(Serialize, Deserialize)]

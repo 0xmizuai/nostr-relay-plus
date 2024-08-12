@@ -1,11 +1,12 @@
 pub mod client;
 mod client_command;
-pub mod event;
-pub mod request;
 pub mod close;
-pub mod job_protocol;
-pub mod db;
 pub mod crypto;
+pub mod db;
+pub mod event;
+pub mod job_protocol;
+pub mod redis;
+pub mod request;
 
 // Used internally, not public API.
 #[doc(hidden)]
