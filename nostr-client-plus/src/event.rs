@@ -1,8 +1,8 @@
 use anyhow::Result;
 use nostr_crypto::signer::Signer;
 use nostr_plus_common::sender::Sender;
-use nostr_plus_common::wire::EventOnWire;
 use nostr_plus_common::types::{Bytes32, Timestamp};
+use nostr_plus_common::wire::EventOnWire;
 use serde_json::json;
 use std::fmt;
 use std::fmt::Formatter;
@@ -54,6 +54,10 @@ impl Event {
 
     pub fn set_sig(&mut self, signature: Vec<u8>) {
         self.0.sig = signature;
+    }
+
+    pub fn kind(&self) -> u16 {
+        self.0.kind
     }
 }
 

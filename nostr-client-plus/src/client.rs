@@ -78,11 +78,15 @@ impl Client {
                         match maybe_ws_msg {
                             Some(msg) => match msg {
                                 Ok(Message::Text(message)) => {
+                                    tracing::debug!("Got Text message");
                                     Self::handle_incoming_message(message, sink.as_ref()).await
                                 }
-                                Ok(Message::Ping(_)) => {} // tungstenite handles Pong already
+                                Ok(Message::Ping(_)) => {
+                                    tracing::debug!("Received Ping request");  // tungstenite handles Pong already
+                                }
                                 Ok(Message::Close(c)) => tracing::warn!("Server closed connection: {:?}", c), // ToDo: do something
                                 Ok(Message::Binary(msg)) => {
+                                    tracing::info!("Received Binary message");
                                     sink.as_ref().map(|ext_tx| {
                                         if ext_tx.send(RelayMessage::Binary(msg)).is_err() {
                                             tracing::error!("Cannot send binary to relay channel");
@@ -112,12 +116,14 @@ impl Client {
                                     }
                                 }
                                 ClientCommand::Event(event) => {
+                                    tracing::debug!("Sending event of type: {}", event.kind());
                                     if basic_ws.send_msg(Message::from(event.to_string())).await.is_err() {
                                         tracing::error!("Event: websocket error");
                                         need_reconnect = true;
                                     }
                                 }
                                 ClientCommand::Close(close_msg) => {
+                                    tracing::warn!("Send Close message");
                                     if basic_ws.send_msg(Message::from(close_msg.to_string())).await.is_err() {
                                         tracing::error!("Close subscription: websocket error");
                                         need_reconnect = true;
@@ -126,6 +132,7 @@ impl Client {
                                     }
                                 }
                                 ClientCommand::Binary(message) => {
+                                    tracing::info!("Sending Binary message");
                                     // Note: only send_binary sends this message and we check there
                                     //  that it is a Message::Binary. But not really future-proof.
                                     if basic_ws.send_msg(message).await.is_err() {

@@ -56,8 +56,9 @@ pub async fn handle_websocket_connection(
                             // ws_sender.close().await.unwrap();
                             tracing::error!("{}", result.unwrap_err());
                         }
+                    } else {
+                        tracing::error!("Cannot deserialize message from {}", who);
                     }
-                    // ToDo: do something if serde fails
                 }
                 Some(Ok(Message::Close(c))) => {
                     if let Some(cf) = c {
@@ -84,6 +85,7 @@ pub async fn handle_websocket_connection(
                 Some(Ok(Message::Binary(msg))) => {
                     // Reset activity
                     last_activity = Instant::now();
+                    tracing::info!("Binary message received from {}", who);
 
                     match local_state.handle_binary_message(msg.as_ref()) {
                         Ok(msg) => {
@@ -102,12 +104,13 @@ pub async fn handle_websocket_connection(
             },
             // Handle Pong timeouts
             _ = Pin::new(&mut pong_timeout_timer), if waiting_for_pong => {
-                    tracing::error!("Pong timeout exceeded");
+                    tracing::error!("Pong timeout exceeded for address {}", who);
                     break;
             }
             // Send Ping if connection not active for more than PING_INTERVAL
             _ = ping_interval_timer.tick() => {
                 let now = Instant::now();
+                tracing::info!("{} inactive, sending ping", who);
                 if now.duration_since(last_activity) >= PING_INTERVAL {
                     tracing::debug!("Sending Ping to {}", who);
                     if let Err(err) = ws_sender.send(Message::Ping(Vec::new())).await {
@@ -134,5 +137,6 @@ pub async fn handle_websocket_connection(
                 let _ = ws_sender.send(msg).await;
             }
         }
+        tracing::warn!("Stopped serving connection for {}", who);
     }
 }
