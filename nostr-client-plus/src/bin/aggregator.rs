@@ -11,6 +11,7 @@ use nostr_client_plus::redis::RedisEventOnWire;
 use nostr_client_plus::request::{Filter, Request};
 use nostr_crypto::eoa_signer::EoaSigner;
 use nostr_crypto::sender_signer::SenderSigner;
+use nostr_plus_common::binary_protocol::BinaryMessage;
 use nostr_plus_common::relay_event::RelayEvent;
 use nostr_plus_common::relay_message::RelayMessage;
 use nostr_plus_common::sender::Sender;
@@ -21,7 +22,9 @@ use sha2::{Digest, Sha512};
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc;
+use tokio_tungstenite::tungstenite::Message;
 use tracing_subscriber::FmtSubscriber;
 
 mod utils;
@@ -29,10 +32,13 @@ use crate::utils::{get_private_key_from_name, get_single_tag_entry};
 
 type AggrMessage = (String, (Sender, ResultPayload, String));
 
+const MONITORING_INTERVAL: Duration = Duration::from_secs(120);
+
 lazy_static! {
     pub static ref REGISTRY: Registry = Registry::default();
     pub static ref FINISHED_JOBS: IntCounter =
-        IntCounter::new("finished_jobs", "Finished Jobs").expect("Failed to create finished_jobs");
+        IntCounter::new("finished_jobs_total", "Total Finished Jobs")
+            .expect("Failed to create finished_jobs");
 }
 
 #[tokio::main]
@@ -195,7 +201,19 @@ async fn run() -> Result<()> {
                         );
                     }
                 }
-                _ => tracing::info!("Non-Event message: ignored"),
+                RelayMessage::EOSE => tracing::debug!("EOSE message"),
+                RelayMessage::Closed => tracing::warn!("Closed message"),
+                RelayMessage::Notice => tracing::debug!("Notice message"),
+                RelayMessage::Auth(_) => tracing::debug!("Auth message"),
+                RelayMessage::Disconnected => {
+                    tracing::error!("Client got disconnected, we are shutting down");
+                    break;
+                }
+                RelayMessage::Binary(msg) => {
+                    if let Err(err) = handle_binary(&msg[..]) {
+                        tracing::error!("{}", err);
+                    }
+                }
             }
         }
         tracing::error!("Error while listening for relay events: task has exited");
@@ -326,9 +344,26 @@ async fn run() -> Result<()> {
         .expect("Cannot subscribe for Results");
     tracing::info!("Subscribed to Result");
 
+    // Spawn task to monitor subscriptions
+    let subs_monitor_handle = tokio::spawn(async move {
+        tracing::info!("Subscription monitor started");
+        loop {
+            tracing::info!("Querying subscriptions");
+            if let Err(err) = client
+                .send_binary(Message::Binary(BinaryMessage::QuerySubscription.to_bytes()))
+                .await
+            {
+                tracing::error!("{}", err);
+            }
+            tokio::time::sleep(MONITORING_INTERVAL).await;
+        }
+        tracing::warn!("Subscription monitor stopped");
+    });
+
     listener_handler.await.unwrap();
     aggregator_handler.await.unwrap();
     metrics_handle.await.unwrap();
+    subs_monitor_handle.await.unwrap();
     tracing::info!("Shutting down gracefully");
     Ok(())
 }
@@ -398,4 +433,16 @@ fn validate_result_event(event: EventOnWire, assign_event: RedisEventOnWire) -> 
     }
 
     Ok(true)
+}
+
+
+fn handle_binary(msg: &[u8]) -> Result<()> {
+    let binary_msg = BinaryMessage::from_bytes(msg)?;
+    match binary_msg {
+        BinaryMessage::QuerySubscription => return Err(anyhow!("Unexpected QuerySubscription")),
+        BinaryMessage::ReplySubscription(count) => {
+            tracing::info!("Active subscriptions: {}", count)
+        }
+    }
+    Ok(())
 }

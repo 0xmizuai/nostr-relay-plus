@@ -12,13 +12,13 @@ use crate::GlobalState;
 use crate::__private::metrics::{WS_CONNECTIONS};
 
 /// A subscription identifier has a maximum length
-const MAX_SUBSCRIPTION_ID_LEN: usize = 256;
+const MAX_SUBSCRIPTION_ID_LEN: u8 = 255;
 
 /// LocalState represents the local state of a single websocket connection
 pub struct LocalState {
     pub(crate) client_ip_addr: SocketAddr,
     pub(crate) subscriptions: HashMap<String, Subscription>,
-    pub(crate) max_subs: usize,
+    pub(crate) max_subs: u8,
 
     pub(crate) auth_challenge: [u8; 32],
 

@@ -15,8 +15,9 @@ pub enum RelayMessage {
     Closed,
     Notice,
     Auth(RelayAuth),
-    // Internal messages
+    // Internal/Non-protocol messages
     Disconnected,
+    Binary(Vec<u8>),
 }
 
 impl Serialize for RelayMessage {
@@ -44,9 +45,8 @@ impl Serialize for RelayMessage {
             | RelayMessage::EOSE
             | RelayMessage::Closed
             | RelayMessage::Notice
-            | RelayMessage::Disconnected => {
-                Err(Error::custom("Unsupported enum for serialization"))
-            }
+            | RelayMessage::Disconnected
+            | RelayMessage::Binary(_) => Err(Error::custom("Unsupported enum for serialization")),
         }
     }
 }

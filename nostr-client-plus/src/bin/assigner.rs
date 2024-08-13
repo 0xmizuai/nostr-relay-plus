@@ -10,6 +10,7 @@ use nostr_client_plus::job_protocol::{JobType, Kind};
 use nostr_client_plus::request::{Filter, Request};
 use nostr_crypto::eoa_signer::EoaSigner;
 use nostr_crypto::sender_signer::SenderSigner;
+use nostr_plus_common::binary_protocol::BinaryMessage;
 use nostr_plus_common::relay_event::RelayEvent;
 use nostr_plus_common::relay_message::RelayMessage;
 use nostr_plus_common::sender::Sender;
@@ -21,6 +22,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tokio::time::{interval, sleep};
+use tokio_tungstenite::tungstenite::Message;
 use tracing_subscriber::FmtSubscriber;
 
 mod utils;
@@ -42,7 +44,8 @@ const STALE_TIME: Duration = Duration::from_secs(300);
 lazy_static! {
     pub static ref REGISTRY: Registry = Registry::default();
     pub static ref ASSIGNED_JOBS: IntCounter =
-        IntCounter::new("assigned_jobs", "Assigned Jobs").expect("Failed to create assigned_jobs");
+        IntCounter::new("assigned_jobs_total", "Total Assigned Jobs")
+            .expect("Failed to create assigned_jobs");
     pub static ref CACHED_JOBS: IntGauge =
         IntGauge::new("cached_jobs", "Cached Jobs").expect("Failed to create cached_jobs");
     pub static ref WORKERS_ONLINE: IntGauge =
@@ -215,6 +218,11 @@ async fn run() -> Result<()> {
                 }
                 _ = alive_interval_timer.tick() => {
                     tracing::info!("I am still alive");
+                    // Request info about current subscriptions
+                    let query = BinaryMessage::QuerySubscription;
+                    if client_eh.lock().await.send_binary(Message::Binary(query.to_bytes())).await.is_err() {
+                        tracing::error!("Cannot query subscriptino status");
+                    }
                 }
                 else => {
                     tracing::warn!("Unexpected select event");
@@ -223,8 +231,10 @@ async fn run() -> Result<()> {
         }
     });
 
-    // subscription id used for NewJob and Alive
-    let sub_id = "ce4788ade0000000000000000000000000000000000000000000000000000000";
+    // subscription id used for NewJob
+    let sub_id_job = "ce4788ade0000000000000000000000000000000000000000000000000000000";
+    // subscription id used for Alive
+    let sub_id_hb = "ce4788ade0000000000000000000000000000000000000000000000000000001";
     let current_time = chrono::Utc::now().timestamp() as u64;
 
     // Subscribe to NewJob and Alive/Heartbeats
@@ -239,14 +249,25 @@ async fn run() -> Result<()> {
         tags: HashMap::from([("#v".to_string(), json!([min_hb.to_string()]))]),
         ..Default::default()
     };
-    let req = Request::new(sub_id.to_string(), vec![filter_job, filter_hb]);
+    let req_job = Request::new(sub_id_job.to_string(), vec![filter_job]);
+    let req_hb = Request::new(sub_id_hb.to_string(), vec![filter_hb]);
+
+    // Send subscription for Jobs
     client
         .lock()
         .await
-        .subscribe(req, Some(0))
+        .subscribe(req_job, Some(0))
         .await
-        .expect("Cannot subscribe");
-    tracing::info!("Subscribed to NewJob and Heartbeats");
+        .expect("Cannot subscribe to NewJobs");
+    tracing::info!("Subscribed to NewJob");
+    // Send subscription for HBs
+    client
+        .lock()
+        .await
+        .subscribe(req_hb, Some(0))
+        .await
+        .expect("Cannot subscribe to HBs");
+    tracing::info!("Subscribed to Heartbeats");
 
     tokio::select! {
         _ = event_handler => tracing::warn!("event handler task has stopped"),
@@ -350,8 +371,24 @@ async fn handle_event(
             tracing::error!("Client got disconnected, we are shutting down");
             Err(anyhow!(Unrecoverable))
         }
-        _ => {
-            tracing::warn!("non-event message");
+        RelayMessage::EOSE => {
+            tracing::debug!("EOSE message");
+            Ok(())
+        }
+        RelayMessage::Closed => {
+            tracing::warn!("Closed message");
+            Ok(())
+        } // ToDo: maybe do something
+        RelayMessage::Notice => {
+            tracing::debug!("Notice message");
+            Ok(())
+        }
+        RelayMessage::Auth(_) => {
+            tracing::debug!("Auth message");
+            Ok(())
+        }
+        RelayMessage::Binary(msg) => {
+            handle_binary(&msg[..])?;
             Ok(())
         }
     }
@@ -429,7 +466,7 @@ fn register_metrics() {
 }
 
 async fn is_too_early(sender: &Sender, ctx: &mut Context) -> bool {
-    let mut assigned_senders = ctx.assigned_senders.lock().await;
+    let assigned_senders = ctx.assigned_senders.lock().await;
     if let Some(last_assigned) = assigned_senders.get(sender) {
         let current_time = Instant::now();
         if current_time.duration_since(*last_assigned) >= COOL_DOWN_PERIOD {
@@ -453,4 +490,15 @@ fn check_avail_workers(ctx: &mut Context) -> Option<NumWorkers> {
     } else {
         None
     }
+}
+
+fn handle_binary(msg: &[u8]) -> Result<()> {
+    let binary_msg = BinaryMessage::from_bytes(msg)?;
+    match binary_msg {
+        BinaryMessage::QuerySubscription => return Err(anyhow!("Unexpected QuerySubscription")),
+        BinaryMessage::ReplySubscription(count) => {
+            tracing::info!("Active subscriptions: {}", count)
+        }
+    }
+    Ok(())
 }

@@ -1,4 +1,4 @@
-use crate::crypto::CryptoHash;
+use crate::{crypto::CryptoHash};
 use crate::job_protocol::ResultPayload;
 use anyhow::Result;
 use futures::StreamExt;

@@ -1,4 +1,5 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
+use serde_json::Value;
 use std::time::SystemTime;
 
 // Just make rust shut-up and let me use this as a private lib
@@ -47,4 +48,21 @@ pub fn get_single_tag_entry(tag: char, tags: &Vec<Vec<String>>) -> Result<Option
         }
     }
     Ok(result)
+}
+
+#[allow(dead_code)]
+pub async fn get_queued_jobs(url: &str, metric_name: &str) -> Result<usize> {
+    let query_url = format!("{}/api/v1/query?query={}", url, metric_name);
+    let response = reqwest::get(&query_url).await?;
+    if !response.status().is_success() {
+        return Err(anyhow!("Failed to fetch metric"));
+    }
+    let body: Value = response.json().await?;
+    let res_array = body["data"]["result"]
+        .as_array()
+        .context("no result array")?;
+    let first = res_array.first().context("res_array empty")?;
+    let value = first["value"][1].as_str().context("empty value")?;
+    let num: usize = value.parse()?;
+    Ok(num)
 }
