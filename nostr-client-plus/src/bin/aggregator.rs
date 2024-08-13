@@ -101,7 +101,7 @@ async fn run() -> Result<()> {
     let db = DbClient::with_uri_str(db_url)
         .await
         .expect("Cannot connect to db")
-        .database("mine_test");
+        .database("mine");
     let collection: Collection<FinishedJobs> = db.collection("finished_jobs");
 
     // Configure Redis
@@ -434,7 +434,6 @@ fn validate_result_event(event: EventOnWire, assign_event: RedisEventOnWire) -> 
 
     Ok(true)
 }
-
 
 fn handle_binary(msg: &[u8]) -> Result<()> {
     let binary_msg = BinaryMessage::from_bytes(msg)?;
