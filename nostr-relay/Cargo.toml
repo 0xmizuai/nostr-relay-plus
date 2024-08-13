@@ -25,7 +25,9 @@ rand = { workspace = true }
 
 axum = { workspace = true }
 axum-extra = { version = "0.9", features = ["typed-header"]}
+chrono = { workspace = true }
 tower-http = { version = "0.5.0", features = ["fs", "trace", "cors"] }
+nostr-client-plus = { workspace = true }
 nostr-crypto = { workspace = true }
 nostr-plus-common = { workspace = true}
 nostr-surreal-db = { workspace = true }

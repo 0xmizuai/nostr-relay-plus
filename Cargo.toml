@@ -22,7 +22,9 @@ members = [
 [workspace.dependencies]
 alloy-primitives = { version = "0.6", features = ["serde"] }
 axum = { version = "0.7", features = ["ws"]}
+chrono = "0.4.38"
 lazy_static = "1.5.0"
+nostr-client-plus = { path = "./nostr-client-plus" }
 nostr-crypto = { path = "./nostr-crypto" }
 nostr-plus-common = { path = "./nostr-plus-common" }
 nostr-surreal-db = { path = "./nostr-surreal-db" }
