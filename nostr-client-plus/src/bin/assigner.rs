@@ -231,8 +231,10 @@ async fn run() -> Result<()> {
         }
     });
 
-    // subscription id used for NewJob and Alive
-    let sub_id = "ce4788ade0000000000000000000000000000000000000000000000000000000";
+    // subscription id used for NewJob
+    let sub_id_job = "ce4788ade0000000000000000000000000000000000000000000000000000000";
+    // subscription id used for Alive
+    let sub_id_hb = "ce4788ade0000000000000000000000000000000000000000000000000000001";
     let current_time = chrono::Utc::now().timestamp() as u64;
 
     // Subscribe to NewJob and Alive/Heartbeats
@@ -247,14 +249,25 @@ async fn run() -> Result<()> {
         tags: HashMap::from([("#v".to_string(), json!([min_hb.to_string()]))]),
         ..Default::default()
     };
-    let req = Request::new(sub_id.to_string(), vec![filter_job, filter_hb]);
+    let req_job = Request::new(sub_id_job.to_string(), vec![filter_job]);
+    let req_hb = Request::new(sub_id_hb.to_string(), vec![filter_hb]);
+
+    // Send subscription for Jobs
     client
         .lock()
         .await
-        .subscribe(req, Some(0))
+        .subscribe(req_job, Some(0))
         .await
-        .expect("Cannot subscribe");
-    tracing::info!("Subscribed to NewJob and Heartbeats");
+        .expect("Cannot subscribe to NewJobs");
+    tracing::info!("Subscribed to NewJob");
+    // Send subscription for HBs
+    client
+        .lock()
+        .await
+        .subscribe(req_hb, Some(0))
+        .await
+        .expect("Cannot subscribe to HBs");
+    tracing::info!("Subscribed to Heartbeats");
 
     tokio::select! {
         _ = event_handler => tracing::warn!("event handler task has stopped"),

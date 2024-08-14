@@ -14,6 +14,7 @@ use nostr_crypto::sender_signer::SenderSigner;
 use nostr_plus_common::relay_event::RelayEvent;
 use nostr_plus_common::relay_message::RelayMessage;
 use nostr_plus_common::sender::Sender;
+use nostr_plus_common::wire::EventOnWire;
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -122,7 +123,7 @@ fn process_assign(ev: RelayEvent, sender: Sender) -> Result<UnsignedEvent> {
     let payload = get_new_job_payload(&ev)?;
     // Let's pretend we did something with the payload, and
     // now we submit the result
-    get_result_event(payload, sender, job_id)
+    get_result_event(ev.event, payload, sender, job_id)
 }
 
 fn get_new_job_payload(ev: &RelayEvent) -> Result<NewJobPayload> {
@@ -131,6 +132,7 @@ fn get_new_job_payload(ev: &RelayEvent) -> Result<NewJobPayload> {
 }
 
 fn get_result_event(
+    assign_event: EventOnWire,
     payload: NewJobPayload,
     sender: Sender,
     job_id: String,

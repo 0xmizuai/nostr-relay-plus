@@ -12,6 +12,7 @@ pub struct AssignerConfig {
 #[derive(Deserialize)]
 pub struct AggregatorConfig {
     pub metrics_socket_addr: String,
+    pub assigner_whitelist: Vec<String>,
 }
 
 pub fn load_config<P: AsRef<Path>>(path: P, section: &str) -> Result<Value> {

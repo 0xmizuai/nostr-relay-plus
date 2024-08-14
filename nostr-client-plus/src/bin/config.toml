@@ -8,3 +8,8 @@ whitelist = [
 
 [aggregator]
 metrics_socket_addr = ":::8881" # or 127.0.0.1:8881 if prometheus is local
+
+# This is a list of pubkeys (in hex form) belonging to Assigners allowed to assign Jobs
+assigner_whitelist = [
+    "01000000d6c99758eb5a19f355e623ed3caef7468793611d", # the initial 01000000 denotes EOA address
+]

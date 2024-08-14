@@ -1,11 +1,13 @@
 use anyhow::{anyhow, Result};
 use lazy_static::lazy_static;
+use mongodb::bson::doc;
 use mongodb::{Client as DbClient, Collection};
 use nostr_client_plus::__private::config::{load_config, AggregatorConfig};
 use nostr_client_plus::__private::metrics::get_metrics_app;
 use nostr_client_plus::client::Client;
 use nostr_client_plus::db::FinishedJobs;
 use nostr_client_plus::job_protocol::{Kind, ResultPayload};
+use nostr_client_plus::redis::RedisEventOnWire;
 use nostr_client_plus::request::{Filter, Request};
 use nostr_crypto::eoa_signer::EoaSigner;
 use nostr_crypto::sender_signer::SenderSigner;
@@ -13,9 +15,12 @@ use nostr_plus_common::binary_protocol::BinaryMessage;
 use nostr_plus_common::relay_event::RelayEvent;
 use nostr_plus_common::relay_message::RelayMessage;
 use nostr_plus_common::sender::Sender;
+use nostr_plus_common::wire::EventOnWire;
 use prometheus::{IntCounter, Registry};
+use redis::{Commands, Connection, RedisError};
+use sha2::{Digest, Sha512};
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -25,7 +30,7 @@ use tracing_subscriber::FmtSubscriber;
 mod utils;
 use crate::utils::{get_private_key_from_name, get_single_tag_entry};
 
-type AggrMessage = (String, (Sender, ResultPayload));
+type AggrMessage = (String, (Sender, ResultPayload, String));
 
 const MONITORING_INTERVAL: Duration = Duration::from_secs(120);
 
@@ -65,6 +70,17 @@ async fn run() -> Result<()> {
     // Get configuration from file
     let config: AggregatorConfig = load_config(config_file_path, "aggregator")?.try_into()?;
 
+    // Check assigner_whitelist is not empty and then create a set out of it
+    if config.assigner_whitelist.is_empty() {
+        return Err(anyhow!("assigner_whitelist is empty"));
+    }
+    let assigner_whitelist: BTreeSet<Sender> = config
+        .assigner_whitelist
+        .into_iter()
+        .map(|s| hex::decode(s).expect("Cannot decode"))
+        .map(|s| Sender::from_bytes(&s).expect("Cannot convert from bytes"))
+        .collect();
+
     // Logger setup
     let subscriber = FmtSubscriber::builder()
         .with_max_level(tracing::Level::DEBUG)
@@ -87,6 +103,11 @@ async fn run() -> Result<()> {
         .expect("Cannot connect to db")
         .database("mine");
     let collection: Collection<FinishedJobs> = db.collection("finished_jobs");
+
+    // Configure Redis
+    let redis_url = std::env::var("REDIS_URL").expect("REDIS_URL is not set");
+    let redis_client = redis::Client::open(redis_url)?;
+    let mut redis_con = redis_client.get_connection()?;
 
     // Get a silly private key based on a string identifying the service.
     let private_key = get_private_key_from_name("Aggregator").unwrap();
@@ -111,11 +132,52 @@ async fn run() -> Result<()> {
         while let Some(msg) = relay_channel.recv().await {
             match msg {
                 RelayMessage::Event(ev) => match ev.event.kind {
+                    // Save 6002 event, for later 6003 verify
+                    Kind::ASSIGN => {
+                        let res = save_event_to_redis(&mut redis_con, ev.event.clone());
+                        match res {
+                            Ok(_) => {
+                                tracing::debug!(
+                                    "Write assigned job to redis: {:?}",
+                                    hex::encode(ev.event.id)
+                                );
+                            }
+                            Err(err) => {
+                                tracing::error!("Cannot write assigned job to redis: {}", err);
+                            }
+                        }
+                    }
                     Kind::RESULT => {
                         if let Ok(payload) = get_result_payload(&ev) {
                             if let Ok(Some(job_id)) = get_single_tag_entry('e', &ev.event.tags) {
+                                // Get saved assign event from redis
+                                let assigned_event: Result<RedisEventOnWire, RedisError> =
+                                    redis_con.get(job_id.clone());
+                                if let Err(err) = assigned_event {
+                                    tracing::error!("Can't find assign_event from job_id, {}", err);
+                                    continue;
+                                }
+                                let assign_event = assigned_event.unwrap();
+
+                                // Check Result event validation
+                                let validate_result =
+                                    validate_result_event(ev.event.clone(), assign_event.clone());
+
+                                match validate_result {
+                                    Err(msg) => {
+                                        tracing::error!("Validate error {}", msg.to_string());
+                                        continue;
+                                    }
+                                    Ok(res) => {
+                                        if !res {
+                                            tracing::error!("Validate Result Event Failed");
+                                            continue;
+                                        }
+                                    }
+                                }
+
                                 let sender = ev.event.sender;
-                                let value = (job_id, (sender, payload));
+                                let value = (job_id, (sender, payload, assign_event.id));
                                 if aggr_tx.send(value).await.is_err() {
                                     tracing::error!("Cannot send to aggregator task");
                                 }
@@ -166,7 +228,7 @@ async fn run() -> Result<()> {
         // keep track of results for matching
         let mut aggr_book: HashMap<String, (Vec<Sender>, ResultPayload)> = HashMap::new();
 
-        while let Some((job_id, (sender, new_payload))) = aggr_rx.recv().await {
+        while let Some((job_id, (sender, new_payload, assign_event_id))) = aggr_rx.recv().await {
             // TODO: parse JobType
             let job_type = new_payload.header.job_type;
             let n_winners = match job_type {
@@ -189,7 +251,9 @@ async fn run() -> Result<()> {
                     timestamp: chrono::Utc::now().timestamp() as u64,
                     result: new_payload.clone(),
                     job_type,
+                    assign_event_id,
                 };
+
                 match collection.insert_one(db_entry, None).await {
                     Ok(_) => {
                         FINISHED_JOBS.inc();
@@ -236,6 +300,7 @@ async fn run() -> Result<()> {
                             timestamp: chrono::Utc::now().timestamp() as u64,
                             result: new_payload,
                             job_type,
+                            assign_event_id,
                         };
                         match collection.insert_one(db_entry, None).await {
                             Ok(_) => {
@@ -259,12 +324,20 @@ async fn run() -> Result<()> {
 
     // Send subscription, so everything will finally start
     let sub_id = "be4788ade0000000000000000000000000000000000000000000000000001111";
-    let filter = Filter {
+    let result_filter = Filter {
         kinds: vec![Kind::RESULT],
-        since: Some(chrono::Utc::now().timestamp() as u64),
+        // Subscribe ASSIGN events since 15 minutes ago
+        since: Some(chrono::Utc::now().timestamp() as u64 - 900),
         ..Default::default()
     };
-    let req = Request::new(sub_id.to_string(), vec![filter]);
+    let assign_filter = Filter {
+        kinds: vec![Kind::ASSIGN],
+        authors: assigner_whitelist.into_iter().collect(),
+        // Subscribe ASSIGN events since 15 minutes ago
+        since: Some(chrono::Utc::now().timestamp() as u64 - 900),
+        ..Default::default()
+    };
+    let req = Request::new(sub_id.to_string(), vec![result_filter, assign_filter]);
     client
         .subscribe(req, Some(120)) // in case of reconnect, get messages 2 mins old
         .await
@@ -304,6 +377,62 @@ fn register_metrics() {
     REGISTRY
         .register(Box::new(FINISHED_JOBS.clone()))
         .expect("Cannot register finished_jobs");
+}
+
+fn save_event_to_redis(redis_con: &mut Connection, event: EventOnWire) -> Result<()> {
+    let key = hex::encode(event.id);
+    let redis_event = RedisEventOnWire {
+        id: key.clone(),
+        sender: hex::encode(event.sender.to_bytes()),
+        tags: event.tags,
+        content: event.content,
+    };
+
+    redis_con.set(key.clone(), redis_event)?;
+    Ok(())
+}
+
+fn validate_result_event(event: EventOnWire, assign_event: RedisEventOnWire) -> Result<bool> {
+    let payload: ResultPayload = serde_json::from_str(event.content.as_str())?;
+    let job_type = payload.header.job_type;
+    // POW event check
+    if job_type == 0 {
+        // Check assignee is Result Sender
+        if let Ok(Some(assignee)) = get_single_tag_entry('p', &assign_event.tags) {
+            if let Ok(assignee_hex) = hex::decode(assignee) {
+                if let Some(assignee_account) = Sender::from_bytes(&assignee_hex) {
+                    if assignee_account != event.sender {
+                        tracing::error!("Assignee mismatch");
+                        return Ok(false);
+                    }
+                } else {
+                    tracing::error!("Invalid p tag in assign_event");
+                    return Ok(false);
+                }
+            } else {
+                tracing::error!("Invalid p tag in assign_event");
+                return Ok(false);
+            }
+        } else {
+            tracing::error!("Missing p tag in assign_event");
+            return Ok(false);
+        }
+
+        // Check pow result, Sha512(raw_data_id + output) is 00000....
+        let mut hex_raw_data_id = hex::encode(payload.header.raw_data_id.hash());
+        hex_raw_data_id.push_str(&payload.output);
+        let mut hasher = Sha512::new();
+        hasher.update(hex_raw_data_id);
+        let result = hasher.finalize();
+        let hex_esult = hex::encode(result);
+        let pow_result_valid = hex_esult.starts_with("00000");
+        if !pow_result_valid {
+            tracing::error!("Pow result invalid");
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
 }
 
 fn handle_binary(msg: &[u8]) -> Result<()> {
