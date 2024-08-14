@@ -63,14 +63,14 @@ pub async fn handle_websocket_connection(
                 }
                 Some(Ok(Message::Close(c))) => {
                     if let Some(cf) = c {
-                        tracing::trace!(
+                        tracing::debug!(
                             ">>> {} sent close with code {} and reason `{}`",
                             who, cf.code, cf.reason
                         );
                     } else {
-                        tracing::trace!(">>> {} sent close", who);
+                        tracing::debug!(">>> {} sent close", who);
                     }
-                    tracing::trace!(">>> Closing our side, too");
+                    tracing::debug!(">>> Closing our side, too");
                     break;
                 }
                 Some(Ok(Message::Pong(_))) => {
@@ -111,7 +111,7 @@ pub async fn handle_websocket_connection(
             // Send Ping if connection not active for more than PING_INTERVAL
             _ = ping_interval_timer.tick() => {
                 let now = Instant::now();
-                tracing::info!("{} inactive, sending ping", who);
+                tracing::debug!("{} Check if inactive", who);
                 if now.duration_since(last_activity) >= PING_INTERVAL {
                     tracing::debug!("Sending Ping to {}", who);
                     if let Err(err) = ws_sender.send(Message::Ping(Vec::new())).await {
@@ -121,6 +121,8 @@ pub async fn handle_websocket_connection(
                     waiting_for_pong = true;
                     pong_timeout_timer = Box::pin(sleep(PONG_TIMEOUT)); // Restart the pong timeout
                     last_activity = now;
+                } else {
+                    tracing::debug!("No need to send ping");
                 }
             }
             Ok(event) = local_state.global_state.global_events_pub_receiver.recv() => {
@@ -136,6 +138,7 @@ pub async fn handle_websocket_connection(
             Some(outgoing) = outgoing_receiver.recv() => {
                 let msg = wrap_ws_message(outgoing);
                 let _ = ws_sender.send(msg).await;
+                tracing::debug!("Replied to {}", local_state.client_ip_addr);
             }
         }
     }
