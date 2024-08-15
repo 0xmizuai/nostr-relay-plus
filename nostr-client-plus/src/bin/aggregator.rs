@@ -54,7 +54,7 @@ async fn run() -> Result<()> {
     // Command line parsing
     let relay_url = std::env::var("RELAY_URL").unwrap_or("ws://127.0.0.1:3033".to_string());
     let supported_version = std::env::var("VERSION").unwrap_or("v0.0.1".to_string());
-    // Anything except empty, will be considered as true
+    // Only string true, will be considered as true
     let skip_pow_check = std::env::var("SKIP_POW_CHECK").unwrap_or("".to_string());
 
     // Command line parsing
