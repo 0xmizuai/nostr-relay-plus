@@ -13,7 +13,6 @@ impl LocalState {
         // send out the challenge
         self.outgoing_sender
             .send(Notice::AuthChallenge(hex::encode(self.auth_challenge)))
-            .await
             .expect("outgoing receiver not to be dropped");
     }
 
@@ -21,10 +20,11 @@ impl LocalState {
     pub async fn handle_incoming_message(&mut self, incoming_message: IncomingMessage) -> Result<()> {
         match incoming_message {
             IncomingMessage::Event(event) => {
+                let sender_hex = hex::encode(event.sender.to_bytes());
                 tracing::debug!(
                     "Received event of kind {} from sender {}",
                     event.kind,
-                    hex::encode(event.sender.to_bytes())
+                    sender_hex
                 );
                 let event_id_hex = hex::encode(event.id);
                 let reply = match self.handle_event(event).await {
@@ -32,17 +32,22 @@ impl LocalState {
                         if self.auth_on_send_global_broadcast_event(&event) {
                             if self.global_state.global_events_pub_sender.send(event).is_err() {
                                 // ToDo: if send is broken is logging enough?
-                                tracing::error!("Cannot send global event");
+                                tracing::error!("Cannot send global event {}", event_id_hex);
+                            } else {
+                                tracing::debug!("Sent global event {}", event_id_hex);
                             }
                         }
                         Notice::saved(event_id_hex)
                     }
-                    Err(err) => Notice::error(event_id_hex, err.to_string().as_str()),
+                    Err(err) => {
+                        tracing::error!("handle_event {event_id_hex}: {err}");
+                        Notice::error(event_id_hex, err.to_string().as_str())
+                    },
                 };
 
                 // We reply even if error, because EVENT needs OK message
-                self.outgoing_sender.send(reply).await?;
-
+                self.outgoing_sender.send(reply)?;
+                tracing::debug!("Reply to sender {sender_hex} queued");
             },
             IncomingMessage::Req(sub) => {
                 tracing::debug!("Received Subscription with id {}", sub.id);
@@ -56,9 +61,15 @@ impl LocalState {
                         .collect::<Vec<_>>()
                 } else { Vec::new() };
 
+                let messages_len = messages.len();
                 for msg in messages {
-                    self.outgoing_sender.send(msg).await?;
+                    self.outgoing_sender.send(msg)?;
                 }
+                tracing::debug!(
+                    "All messages {} for subscription {} sent",
+                    messages_len,
+                    sub.id
+                );
 
                 self.subscribe(sub)?;
             },
@@ -71,7 +82,7 @@ impl LocalState {
                 tracing::info!("Cancelling subscription {}", sub_id);
                 self.unsubscribe(sub_id.as_str());
             },
-            _ => {}
+            _ => tracing::warn!("Unhandled message"),
         }
         Ok(())
     }
@@ -100,9 +111,13 @@ impl LocalState {
 
     pub async fn handle_global_incoming_events(&self, event: Event) -> Result<()> {
         let id = self.is_interested(&event)?;
-        tracing::info!("Sending event of type {} for subscription {}", event.kind, id);
+        tracing::info!(
+            "Sending event of type {} for subscription {}",
+            event.kind,
+            id
+        );
         let notice = Notice::event(id, event);
-        self.outgoing_sender.send(notice).await?;
+        self.outgoing_sender.send(notice)?;
 
         Ok(())
     }
