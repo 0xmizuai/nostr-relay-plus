@@ -39,6 +39,9 @@ lazy_static! {
     pub static ref FINISHED_JOBS: IntCounter =
         IntCounter::new("finished_jobs_total", "Total Finished Jobs")
             .expect("Failed to create finished_jobs");
+    pub static ref FAILED_JOBS: IntCounter =
+        IntCounter::new("failed_jobs_total", "Total Failed Jobs")
+            .expect("Failed to create failed_jobs");
 }
 
 #[tokio::main]
@@ -171,11 +174,13 @@ async fn run() -> Result<()> {
                                 match validate_result {
                                     Err(msg) => {
                                         tracing::error!("Validate error {}", msg.to_string());
+                                        FAILED_JOBS.inc();
                                         continue;
                                     }
                                     Ok(res) => {
                                         if !res {
                                             tracing::error!("Validate Result Event Failed");
+                                            FAILED_JOBS.inc();
                                             continue;
                                         }
                                     }
@@ -382,6 +387,10 @@ fn register_metrics() {
     REGISTRY
         .register(Box::new(FINISHED_JOBS.clone()))
         .expect("Cannot register finished_jobs");
+
+    REGISTRY
+        .register(Box::new(FAILED_JOBS.clone()))
+        .expect("Cannot register failed_jobs");
 }
 
 fn save_event_to_redis(redis_con: &mut Connection, event: EventOnWire) -> Result<()> {
