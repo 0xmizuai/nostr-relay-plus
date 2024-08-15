@@ -54,6 +54,8 @@ async fn run() -> Result<()> {
     // Command line parsing
     let relay_url = std::env::var("RELAY_URL").unwrap_or("ws://127.0.0.1:3033".to_string());
     let supported_version = std::env::var("VERSION").unwrap_or("v0.0.1".to_string());
+    // Anything except empty, will be considered as true
+    let skip_pow_check = std::env::var("SKIP_POW_CHECK").unwrap_or("".to_string());
 
     // Command line parsing
     let args: Vec<String> = std::env::args().collect();
@@ -160,8 +162,11 @@ async fn run() -> Result<()> {
                                 let assign_event = assigned_event.unwrap();
 
                                 // Check Result event validation
-                                let validate_result =
-                                    validate_result_event(ev.event.clone(), assign_event.clone());
+                                let validate_result = validate_result_event(
+                                    ev.event.clone(),
+                                    assign_event.clone(),
+                                    !skip_pow_check.is_empty(),
+                                );
 
                                 match validate_result {
                                     Err(msg) => {
@@ -392,7 +397,11 @@ fn save_event_to_redis(redis_con: &mut Connection, event: EventOnWire) -> Result
     Ok(())
 }
 
-fn validate_result_event(event: EventOnWire, assign_event: RedisEventOnWire) -> Result<bool> {
+fn validate_result_event(
+    event: EventOnWire,
+    assign_event: RedisEventOnWire,
+    skip_pow_check: bool,
+) -> Result<bool> {
     let payload: ResultPayload = serde_json::from_str(event.content.as_str())?;
     let job_type = payload.header.job_type;
     // POW event check
@@ -416,6 +425,10 @@ fn validate_result_event(event: EventOnWire, assign_event: RedisEventOnWire) -> 
         } else {
             tracing::error!("Missing p tag in assign_event");
             return Ok(false);
+        }
+
+        if (skip_pow_check) {
+            return Ok(true);
         }
 
         // Check pow result, Sha512(raw_data_id + output) is 00000....
