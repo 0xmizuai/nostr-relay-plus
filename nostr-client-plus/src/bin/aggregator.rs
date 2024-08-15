@@ -160,7 +160,6 @@ async fn run() -> Result<()> {
                                     redis_con.get(job_id.clone());
                                 if let Err(err) = assigned_event {
                                     tracing::error!("Can't find assign_event from job_id, {}", err);
-                                    FAILED_JOBS.inc();
                                     continue;
                                 }
                                 let assign_event = assigned_event.unwrap();
