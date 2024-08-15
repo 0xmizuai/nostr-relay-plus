@@ -165,7 +165,7 @@ async fn run() -> Result<()> {
                                 let validate_result = validate_result_event(
                                     ev.event.clone(),
                                     assign_event.clone(),
-                                    !skip_pow_check.is_empty(),
+                                    skip_pow_check == "true",
                                 );
 
                                 match validate_result {
