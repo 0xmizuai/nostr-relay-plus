@@ -22,7 +22,7 @@ pub struct LocalState {
 
     pub(crate) auth_challenge: [u8; 32],
 
-    pub(crate) outgoing_sender: mpsc::UnboundedSender<Notice>,
+    pub(crate) outgoing_sender: mpsc::Sender<Notice>,
     pub(crate) global_state: GlobalState,
     pub(crate) is_authenticated: bool,
 }
@@ -31,7 +31,7 @@ pub struct LocalState {
 impl LocalState {
     pub fn new(
         client_ip_addr: SocketAddr,
-        outgoing_sender: mpsc::UnboundedSender<Notice>,
+        outgoing_sender: mpsc::Sender<Notice>,
         global_state: GlobalState,
     ) -> Self {
         let res = Self {

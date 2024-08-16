@@ -13,6 +13,7 @@ impl LocalState {
         // send out the challenge
         self.outgoing_sender
             .send(Notice::AuthChallenge(hex::encode(self.auth_challenge)))
+            .await
             .expect("outgoing receiver not to be dropped");
     }
 
@@ -46,7 +47,7 @@ impl LocalState {
                 };
 
                 // We reply even if error, because EVENT needs OK message
-                self.outgoing_sender.send(reply)?;
+                self.outgoing_sender.send(reply).await?;
                 tracing::debug!("Reply to sender {sender_hex} queued");
             },
             IncomingMessage::Req(sub) => {
@@ -63,7 +64,7 @@ impl LocalState {
 
                 let messages_len = messages.len();
                 for msg in messages {
-                    self.outgoing_sender.send(msg)?;
+                    self.outgoing_sender.send(msg).await?;
                 }
                 tracing::debug!(
                     "All messages {} for subscription {} sent",
@@ -117,7 +118,7 @@ impl LocalState {
             id
         );
         let notice = Notice::event(id, event);
-        self.outgoing_sender.send(notice)?;
+        self.outgoing_sender.send(notice).await?;
 
         Ok(())
     }
