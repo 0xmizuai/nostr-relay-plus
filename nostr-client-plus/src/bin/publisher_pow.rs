@@ -13,7 +13,7 @@ use tokio::time::{interval, Instant};
 mod utils;
 use crate::utils::get_queued_jobs;
 
-const TIMEOUT: Duration = Duration::from_secs(10);
+const TIMEOUT: Duration = Duration::from_secs(30);
 const LOW_VAL_JOBS: usize = 5_000;
 
 #[tokio::main]
