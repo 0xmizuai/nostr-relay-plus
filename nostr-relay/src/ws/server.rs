@@ -22,7 +22,7 @@ pub async fn handle_websocket_connection(
     let (mut ws_sender, mut ws_receiver) = socket.split();
 
     // 1. spawn the local connection state 
-    let (outgoing_sender, mut outgoing_receiver) = mpsc::channel(100_000);
+    let (outgoing_sender, mut outgoing_receiver) = mpsc::unbounded_channel();
     let mut local_state = LocalState::new(
         who, outgoing_sender,
         global_state.clone()
