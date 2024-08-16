@@ -125,20 +125,28 @@ pub async fn handle_websocket_connection(
                     tracing::debug!("No need to send ping");
                 }
             }
-            Ok(event) = local_state.global_state.global_events_pub_receiver.recv() => {
-                let result = local_state.handle_global_incoming_events(event).await;
-                // ToDo: this handling is wrong because any error with broadcasting, including
-                //  unwanted events, results in the termination of the main websocket.
-                // if result.is_err() {
-                //     let closing_notice = wrap_error_message("glob something", &result.err().unwrap());
-                //     let _ = ws_sender.send(closing_notice).await;
-                //     ws_sender.close().await.unwrap();
-                // }
+            maybe_event = local_state.global_state.global_events_pub_receiver.recv() => {
+                match maybe_event {
+                    Ok(event) => {
+                        let result = local_state.handle_global_incoming_events(event).await;
+                        // ToDo: this handling is wrong because any error with broadcasting, including
+                        //  unwanted events, results in the termination of the main websocket.
+                        // if result.is_err() {
+                        //     let closing_notice = wrap_error_message("glob something", &result.err().unwrap());
+                        //     let _ = ws_sender.send(closing_notice).await;
+                        //     ws_sender.close().await.unwrap();
+                        // }
+                    }
+                    Err(err) => tracing::error!("global event receiver: {}", err),
+                }
             },
             Some(outgoing) = outgoing_receiver.recv() => {
                 let msg = wrap_ws_message(outgoing);
                 let _ = ws_sender.send(msg).await;
                 tracing::debug!("Replied to {}", local_state.client_ip_addr);
+            }
+            else => {
+                tracing::warn!("Unhandled case in select statement");
             }
         }
     }
