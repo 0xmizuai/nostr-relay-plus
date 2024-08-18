@@ -23,7 +23,7 @@ use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tokio::time::{interval, sleep};
 use tokio_tungstenite::tungstenite::Message;
-use tracing_subscriber::FmtSubscriber;
+use nostr_plus_common::logging::init_tracing;
 
 mod utils;
 use crate::utils::get_single_tag_entry;
@@ -94,10 +94,7 @@ async fn run() -> Result<()> {
         .collect();
 
     // Logger setup
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(tracing::Level::DEBUG)
-        .finish();
-    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+    init_tracing();
 
     // Metrics
     register_metrics();

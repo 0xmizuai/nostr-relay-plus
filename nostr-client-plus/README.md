@@ -15,6 +15,19 @@ started before the other services.
 Most services require a configuration file in order to start.
 We provide one in `src/bin/config.toml`; check inline comments for more information.
 
+### Logging
+
+
+Logging is controlled by `RUST_LOG` (compliant with `env_logger` syntax) and `LOG_FORMAT`.
+
+For example
+```shell
+RUST_LOG=warn
+LOG_FORMAT=json 
+```
+will set the max log level to WARN and format using a machine parsable json.  
+Default is INFO and full format, that is human-readable.
+
 ### Assigner
 
 Assigner accepts a few environment variables.  

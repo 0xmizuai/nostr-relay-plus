@@ -31,8 +31,6 @@ nostr-plus-common = { workspace = true}
 nostr-surreal-db = { workspace = true }
 
 tracing = { workspace = true }
-tracing-appender = { workspace = true }
-tracing-subscriber = { workspace = true }
 
 
 [features]

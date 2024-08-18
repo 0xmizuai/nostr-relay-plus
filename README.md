@@ -33,4 +33,15 @@ SURREAL_URL
 SURREAL_USER
 SURREAL_PASS
 ```
+
+Logging is controlled by `RUST_LOG` (compliant with `env_logger` syntax) and `LOG_FORMAT`.
+
+For example
+```shell
+RUST_LOG=warn
+LOG_FORMAT=json 
+```
+will set the max log level to WARN and format using a machine parsable json.  
+Default is INFO and full format, that is human-readable.
+
 **SURREAL_URL** must be a wss address.
