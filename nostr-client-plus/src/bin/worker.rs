@@ -89,7 +89,7 @@ async fn main() {
                         chrono::Utc::now().timestamp() as u64,
                         Kind::ALIVE,
                         vec![
-                            vec!["v".to_string(), "1".to_string()],
+                            vec!["v".to_string(), "3".to_string()],
                         ],
                         String::default(),
                     );

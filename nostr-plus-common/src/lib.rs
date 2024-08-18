@@ -6,3 +6,4 @@ pub mod types;
 pub mod wire;
 mod relay_auth;
 pub mod binary_protocol;
+pub mod logging;

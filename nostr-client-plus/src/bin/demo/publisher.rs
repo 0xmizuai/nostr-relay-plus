@@ -2,13 +2,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use serde_json::json;
 use tokio::sync::Mutex;
-use tracing_subscriber::FmtSubscriber;
 
 use nostr_client_plus::client::Client;
 use nostr_client_plus::event::UnsignedEvent;
 use nostr_client_plus::request::{Filter, Request};
 use nostr_crypto::eoa_signer::EoaSigner;
 use nostr_crypto::sender_signer::SenderSigner;
+use nostr_plus_common::logging::init_tracing;
 use nostr_plus_common::relay_message::RelayMessage;
 
 #[path = "../utils.rs"]
@@ -20,11 +20,7 @@ type PublisherEv = (String, Vec<String>);
 #[tokio::main]
 async fn main() {
     // Logger setup
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(tracing::Level::INFO)
-        .finish();
-    tracing::subscriber::set_global_default(subscriber)
-        .expect("setting default subscriber failed");
+    init_tracing();
 
     // Create client
     let signer = EoaSigner::from_bytes(&[7; 32]);

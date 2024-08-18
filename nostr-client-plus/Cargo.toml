@@ -59,7 +59,6 @@ strum = "0.26.3"
 strum_macros = "0.26.4"
 toml = "0.8.16"
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 dotenv="*"
 prometheus = { workspace = true }
 sha2 = "0.10.8"

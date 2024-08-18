@@ -5,10 +5,9 @@ use anyhow::Result;
 use axum::routing::get;
 use axum::Router;
 use tower_http::cors::CorsLayer;
+use nostr_plus_common::logging::init_tracing;
 use nostr_relay::{ws_wrapper, GlobalState};
 use nostr_relay::__private::metrics::{metrics_handler, REGISTRY, WS_CONNECTIONS};
-use tracing_subscriber::FmtSubscriber;
-
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -20,10 +19,7 @@ async fn main() -> Result<()> {
     }
 
     // Logger setup
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(tracing::Level::DEBUG)
-        .finish();
-    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+    init_tracing();
 
     // Initialize metrics
     register_metrics();
