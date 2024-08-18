@@ -21,7 +21,7 @@ impl Clone for GlobalState {
 
 impl GlobalState {
     pub async fn new_with_local_db() -> Result<Self> {
-        let (sender, receiver) = broadcast::channel(100);
+        let (sender, receiver) = broadcast::channel(1_000_000);
         let db = DB::local_connect().await?;
         Ok(Self {
             db,
@@ -31,7 +31,7 @@ impl GlobalState {
     }
 
     pub async fn new_with_remote_db() -> Result<Self> {
-        let (sender, receiver) = broadcast::channel(100);
+        let (sender, receiver) = broadcast::channel(1_000_000);
         let db = DB::prod_connect().await?;
         Ok(Self {
             db,
