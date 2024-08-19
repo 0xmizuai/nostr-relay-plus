@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
-use nostr_plus_common::types::{Bytes32, Timestamp};
 use nostr_plus_common::sender::Sender;
+use nostr_plus_common::types::{Bytes32, Timestamp};
 use nostr_plus_common::wire::EventOnWire;
 use serde::{Deserialize, Serialize};
 
@@ -30,13 +30,12 @@ impl TryFrom<EventOnWire> for Event {
     type Error = anyhow::Error;
 
     fn try_from(raw_event: EventOnWire) -> Result<Self, Self::Error> {
-        
         // assert the id
         let expected_id = raw_event.to_id_hash();
         if raw_event.id != expected_id {
             return Err(anyhow!(
-                "invalid event id, expected {}, got {}", 
-                hex::encode(expected_id), 
+                "invalid event id, expected {}, got {}",
+                hex::encode(expected_id),
                 hex::encode(raw_event.id)
             ));
         }
@@ -44,7 +43,11 @@ impl TryFrom<EventOnWire> for Event {
         // sanity check
         let now = get_current_timstamp();
         if raw_event.created_at > now {
-            return Err(anyhow!("invalid event created_at"));
+            return Err(anyhow!(
+                "invalid event created_at: {}, now: {}",
+                raw_event.created_at,
+                now
+            ));
         }
 
         // parse the tags
@@ -68,13 +71,13 @@ impl TryFrom<EventOnWire> for Event {
                 if tag[0].len() > 1 {
                     continue;
                 }
-                
+
                 t.push((tag[0].clone(), tag[1].clone()));
             }
         }
 
         Ok(Event {
-            id: raw_event.id, 
+            id: raw_event.id,
 
             sender: raw_event.sender,
             sig: raw_event.sig,
@@ -92,17 +95,17 @@ impl TryFrom<EventOnWire> for Event {
 
 impl Event {
     pub fn match_filter(&self, filter: &Filter) -> bool {
-        if filter.match_id(&self.id) &&
-            filter.match_author(&self.sender) &&
-            filter.match_kind(self.kind) &&
-            filter.match_tag(&self.tags)
+        if filter.match_id(&self.id)
+            && filter.match_author(&self.sender)
+            && filter.match_kind(self.kind)
+            && filter.match_tag(&self.tags)
         {
             return true;
         }
 
         false
     }
-    
+
     pub fn match_filters(&self, filters: &[Filter]) -> bool {
         for f in filters {
             if self.match_filter(f) {
@@ -154,7 +157,7 @@ mod tests {
             "tags": []
           }
         "#;
-        
+
         let raw_event: EventOnWire = serde_json::from_str(note).unwrap();
         let event: Event = raw_event.try_into().unwrap();
         assert_eq!(event.tags.len(), 0);
@@ -176,7 +179,7 @@ mod tests {
         "#;
 
         let raw_event: EventOnWire = serde_json::from_str(note).unwrap();
-        
+
         assert_eq!(
             hex::encode(raw_event.to_id_hash()),
             hex::encode(raw_event.id)
@@ -210,4 +213,3 @@ mod tests {
         Ok(())
     }
 }
-
