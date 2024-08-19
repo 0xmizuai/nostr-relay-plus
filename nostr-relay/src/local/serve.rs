@@ -93,9 +93,11 @@ impl LocalState {
         e.validate()?; // ToDo: `verify` on EventOnWire or `validate` on Event?
 
         // ToDo: Remove. Temporary hack to treat heartbeats as ephemeral
-        if e.kind == 6_001 {
-            return Ok(e);
-        }
+        // if e.kind == 6_001 {
+        //     return Ok(e);
+        // }
+        // ToDo: remove me and fix me properly. Skipping SurrealDB
+        return Ok(e);
 
         if self.auth_on_db_write(&e) {
             tracing::debug!(
