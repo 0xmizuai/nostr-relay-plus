@@ -92,6 +92,8 @@ pub async fn handle_websocket_connection(
                         Ok(msg) => {
                             if ws_sender.send(Message::Binary(msg)).await.is_err() {
                                 tracing::error!("Cannot send binary msg");
+                            } else {
+                                tracing::info!("Binary reply to {}", who);
                             }
                         }
                         Err(err) => tracing::warn!("{}", err),
