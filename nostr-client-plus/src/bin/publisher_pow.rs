@@ -19,7 +19,7 @@ const LOW_VAL_JOBS: usize = 5_000;
 #[tokio::main]
 async fn main() {
     if let Err(err) = run().await {
-        eprint!("{}", err);
+        eprintln!("{}", err);
         std::process::exit(1);
     }
 }
@@ -65,20 +65,23 @@ async fn run() -> Result<()> {
     let mut last_activity = Instant::now();
     let listener_handle = tokio::spawn(async move {
         println!("OK Listener started");
+        let mut ack_received: u32 = 0;
         loop {
             tokio::select! {
                 Some(RelayMessage::Ok(ok_msg)) = relay_channel.recv() => {
                     last_activity = Instant::now();
+                    ack_received += 1;
                     if ok_msg.accepted {
                         println!("Job published: {}", hex::encode(ok_msg.event_id));
                     } else {
-                        println!(r#"Job {} rejected: "{}""#, hex::encode(ok_msg.event_id), ok_msg.message);
+                        eprintln!(r#"Job {} rejected: "{}""#, hex::encode(ok_msg.event_id), ok_msg.message);
                     }
                 }
                 _ = timeout_timer.tick() => {
                     let now = Instant::now();
                     if now.duration_since(last_activity) >= TIMEOUT {
                         println!("No more OK messages within the last {}s, closing", TIMEOUT.as_secs());
+                        println!("{} ACK received in total", ack_received);
                         break;
                     }
                 }
@@ -95,6 +98,7 @@ async fn run() -> Result<()> {
     let job_type = JobType::PoW.job_type();
     let job_type_str = JobType::PoW.as_ref();
 
+    let mut jobs_sent: u32 = 0;
     for _ in 0..limit_publish {
         let header = PayloadHeader {
             job_type,
@@ -115,10 +119,12 @@ async fn run() -> Result<()> {
         );
         if client.publish(event).await.is_err() {
             eprintln!("Cannot publish job");
+        } else {
+            jobs_sent += 1;
         }
     }
 
     listener_handle.await?;
-    println!("Done");
+    println!("Done: {} jobs sent", jobs_sent);
     Ok(())
 }
