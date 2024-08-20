@@ -51,25 +51,26 @@ impl LocalState {
             },
             IncomingMessage::Req(sub) => {
                 tracing::debug!("Received Subscription with id {}", sub.id);
-                let filters = sub.parse_filters()?;
-                let messages = if self.auth_on_db_read() {
-                    self.global_state.db.query_by_filters(&filters).await?
-                        .iter()
-                        .map(|e| {  
-                            Notice::event(sub.id.clone(), e.clone())
-                        })
-                        .collect::<Vec<_>>()
-                } else { Vec::new() };
+                // ToDo: uncomment following code and fix me properly. Skipping SurrealDB
+                // let filters = sub.parse_filters()?;
+                // let messages = if self.auth_on_db_read() {
+                //     self.global_state.db.query_by_filters(&filters).await?
+                //         .iter()
+                //         .map(|e| {  
+                //             Notice::event(sub.id.clone(), e.clone())
+                //         })
+                //         .collect::<Vec<_>>()
+                // } else { Vec::new() };
 
-                let messages_len = messages.len();
-                for msg in messages {
-                    self.outgoing_sender.send(msg)?;
-                }
-                tracing::debug!(
-                    "All messages {} for subscription {} sent",
-                    messages_len,
-                    sub.id
-                );
+                // let messages_len = messages.len();
+                // for msg in messages {
+                //     self.outgoing_sender.send(msg)?;
+                // }
+                // tracing::debug!(
+                //     "All messages {} for subscription {} sent",
+                //     messages_len,
+                //     sub.id
+                // );
 
                 self.subscribe(sub)?;
             },
@@ -96,18 +97,18 @@ impl LocalState {
         // if e.kind == 6_001 {
         //     return Ok(e);
         // }
-        // ToDo: remove me and fix me properly. Skipping SurrealDB
-        return Ok(e);
 
-        if self.auth_on_db_write(&e) {
-            tracing::debug!(
-                        "Writing Event ID {} to db on IP {:?}",
-                        hex::encode(e.id),
-                        self.client_ip_addr
-                    );
-            self.global_state.db.write_event(&e).await?;
-            tracing::debug!("Done Writing Event to db");
-        }
+        // ToDo: uncomment following code and fix me properly. Skipping SurrealDB
+        // if self.auth_on_db_write(&e) {
+        //     tracing::debug!(
+        //                 "Writing Event ID {} to db on IP {:?}",
+        //                 hex::encode(e.id),
+        //                 self.client_ip_addr
+        //             );
+        //     self.global_state.db.write_event(&e).await?;
+        //     tracing::debug!("Done Writing Event to db");
+        // }
+
         Ok(e)
     }
 
