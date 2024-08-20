@@ -106,15 +106,14 @@ async fn run() -> Result<()> {
     });
 
     // Private key
-    let private_key = hex::decode(raw_private_key).unwrap().try_into().unwrap();
+    let private_key = hex::decode(raw_private_key)?.try_into().unwrap();
 
     // Create nostr-relay client
     let signer = EoaSigner::from_bytes(&private_key);
     let mut client = Client::new(SenderSigner::Eoa(signer));
     let mut relay_channel = client
         .connect_with_channel(relay_url.as_str())
-        .await
-        .unwrap();
+        .await?;
     let client = Arc::new(Mutex::new(client));
 
     let client_eh = client.clone();
