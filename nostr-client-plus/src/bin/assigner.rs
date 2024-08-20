@@ -126,7 +126,7 @@ async fn run() -> Result<()> {
         tracing::info!("Assigner event handler started");
 
         // Publishing channel
-        let (pub_tx, mut pub_rx) = mpsc::channel(100);
+        let (pub_tx, mut pub_rx) = mpsc::unbounded_channel();
 
         // Data structure to keep track of most recent workers
         let avail_workers = WorkersBook::new();
@@ -277,7 +277,7 @@ async fn run() -> Result<()> {
 async fn handle_event(
     msg: RelayMessage,
     ctx: &mut Context,
-    pub_tx: &mpsc::Sender<PubStruct>,
+    pub_tx: &mpsc::UnboundedSender<PubStruct>,
 ) -> Result<()> {
     match msg {
         RelayMessage::Event(ev) => {
@@ -311,7 +311,6 @@ async fn handle_event(
                         CACHED_JOBS.dec();
                         pub_tx
                             .send((workers, ev))
-                            .await
                             .expect("pub channel broken");
                     }
                     // Keep the number of workers below a certain threshold
@@ -344,7 +343,6 @@ async fn handle_event(
                         };
                         pub_tx
                             .send((workers, ev))
-                            .await
                             .expect("pub channel broken");
                     }
                     Ok(())
