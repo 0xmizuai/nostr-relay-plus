@@ -7,7 +7,7 @@ use axum::routing::get;
 use axum::Router;
 use nostr_plus_common::logging::init_tracing;
 use nostr_relay::__private::metrics::{
-    metrics_handler, REGISTRY, RX_EVENT_COUNTER, WS_CONNECTIONS,
+    metrics_handler, REGISTRY, RX_EVENT_COUNTER, TX_EVENT_COUNTER, WS_CONNECTIONS,
 };
 use nostr_relay::{ws_wrapper, GlobalState};
 use tower_http::cors::CorsLayer;
@@ -66,4 +66,7 @@ fn register_metrics() {
     REGISTRY
         .register(Box::new(RX_EVENT_COUNTER.clone()))
         .expect("Cannot register RX_EVENT_COUNTER");
+    REGISTRY
+        .register(Box::new(TX_EVENT_COUNTER.clone()))
+        .expect("Cannot register TX_EVENT_COUNTER");
 }

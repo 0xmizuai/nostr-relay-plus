@@ -6,6 +6,7 @@ use tokio::{select, sync::mpsc};
 use tokio::time::{Duration, Instant, interval, sleep};
 
 use crate::{local::LocalState, util::wrap_error_message};
+use crate::__private::metrics::track_tx_event;
 use crate::GlobalState;
 use crate::message::IncomingMessage;
 use crate::util::{wrap_ws_message, unwrap_ws_message};
@@ -143,8 +144,12 @@ pub async fn handle_websocket_connection(
                 }
             },
             Some(outgoing) = outgoing_receiver.recv() => {
+                let maybe_kind = outgoing.get_event_kind();
                 let msg = wrap_ws_message(outgoing);
                 let _ = ws_sender.send(msg).await;
+                if let Some(kind) = maybe_kind {
+                    track_tx_event(kind);
+                }
                 tracing::debug!("Replied to {}", local_state.client_ip_addr);
             }
             else => {

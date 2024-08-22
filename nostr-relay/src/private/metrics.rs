@@ -13,6 +13,11 @@ lazy_static! {
         &["event_id"]
     )
     .expect("failed to create RX_EVENT_COUNTER");
+    pub static ref TX_EVENT_COUNTER: IntCounterVec = IntCounterVec::new(
+        opts!("sent_event_count", "Count of sent events"),
+        &["event_id"]
+    )
+    .expect("failed to create TX_EVENT_COUNTER");
 }
 
 pub async fn metrics_handler() -> String {
@@ -21,10 +26,18 @@ pub async fn metrics_handler() -> String {
 }
 
 #[inline]
-pub fn track_event(event_id: u16) {
+pub fn track_rx_event(event_id: u16) {
     match RX_EVENT_COUNTER.get_metric_with_label_values(&[u16_to_str(event_id)]) {
         Ok(metrics) => metrics.inc(),
-        Err(err) => tracing::error!("track_event: {err}"),
+        Err(err) => tracing::error!("track_rx_event: {err}"),
+    }
+}
+
+#[inline]
+pub fn track_tx_event(event_id: u16) {
+    match TX_EVENT_COUNTER.get_metric_with_label_values(&[u16_to_str(event_id)]) {
+        Ok(metrics) => metrics.inc(),
+        Err(err) => tracing::error!("track_tx_event: {err}"),
     }
 }
 
