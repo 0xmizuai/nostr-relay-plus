@@ -106,6 +106,13 @@ impl Notice {
         Notice::Event((sub_id, event))
     }
 
+    pub fn get_event_kind(&self) -> Option<u16> {
+        match &self {
+            Notice::Event((_, ev)) => Some(ev.kind),
+            _ => None,
+        }
+    }
+
     pub fn eose(id: String) -> Notice {
         Notice::Eose(id)
     }

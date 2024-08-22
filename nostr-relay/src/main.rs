@@ -1,13 +1,16 @@
+use std::env;
 use std::net::SocketAddr;
 
 use anyhow::Result;
 
 use axum::routing::get;
 use axum::Router;
-use tower_http::cors::CorsLayer;
 use nostr_plus_common::logging::init_tracing;
+use nostr_relay::__private::metrics::{
+    metrics_handler, REGISTRY, RX_EVENT_COUNTER, TX_EVENT_COUNTER, WS_CONNECTIONS,
+};
 use nostr_relay::{ws_wrapper, GlobalState};
-use nostr_relay::__private::metrics::{metrics_handler, REGISTRY, WS_CONNECTIONS};
+use tower_http::cors::CorsLayer;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -59,5 +62,11 @@ async fn main() -> Result<()> {
 fn register_metrics() {
     REGISTRY
         .register(Box::new(WS_CONNECTIONS.clone()))
-        .expect("Cannot register ws_connections");
+        .expect("Cannot register WS_CONNECTIONS");
+    REGISTRY
+        .register(Box::new(RX_EVENT_COUNTER.clone()))
+        .expect("Cannot register RX_EVENT_COUNTER");
+    REGISTRY
+        .register(Box::new(TX_EVENT_COUNTER.clone()))
+        .expect("Cannot register TX_EVENT_COUNTER");
 }
