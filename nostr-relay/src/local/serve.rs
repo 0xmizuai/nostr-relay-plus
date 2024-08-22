@@ -1,14 +1,17 @@
 use anyhow::{anyhow, Result};
 use nostr_plus_common::binary_protocol::BinaryMessage;
-use nostr_surreal_db::message::{events::Event, filter::Filter, notice::Notice};
 use nostr_plus_common::wire::EventOnWire;
-
-use crate::{local::hooks::LocalStateHooks, message::IncomingMessage, util::wrap_ws_message};
+use nostr_surreal_db::message::{events::Event, filter::Filter, notice::Notice};
 
 use super::LocalState;
+use crate::{
+    __private::metrics::{track_event, RX_EVENT_COUNTER},
+    local::hooks::LocalStateHooks,
+    message::IncomingMessage,
+    util::wrap_ws_message,
+};
 
 impl LocalState {
-
     pub async fn start_auhentication(&mut self) {
         // send out the challenge
         self.outgoing_sender
@@ -20,6 +23,7 @@ impl LocalState {
     pub async fn handle_incoming_message(&mut self, incoming_message: IncomingMessage) -> Result<()> {
         match incoming_message {
             IncomingMessage::Event(event) => {
+                track_event(event.kind);
                 let sender_hex = hex::encode(event.sender.to_bytes());
                 tracing::debug!(
                     "Received event of kind {} from sender {}",
