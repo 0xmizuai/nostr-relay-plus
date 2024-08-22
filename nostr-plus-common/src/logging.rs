@@ -10,6 +10,7 @@ pub fn init_tracing() {
 
     match format.as_str() {
         "json" => subscriber.json().init(),
+        "json_flatten" => subscriber.json().flatten_event(true).init(),
         "compact" => subscriber.compact().init(),
         "pretty" => subscriber.pretty().init(),
         _ => subscriber.init(),
