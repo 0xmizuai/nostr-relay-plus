@@ -16,7 +16,7 @@ use nostr_plus_common::relay_event::RelayEvent;
 use nostr_plus_common::relay_message::RelayMessage;
 use nostr_plus_common::sender::Sender;
 use nostr_plus_common::wire::EventOnWire;
-use prometheus::{IntCounter, Registry};
+use prometheus::{IntCounter, IntGauge, Registry};
 use redis::{Commands, Connection, RedisError};
 use sha2::{Digest, Sha512};
 use std::collections::hash_map::Entry;
@@ -38,10 +38,19 @@ lazy_static! {
     pub static ref REGISTRY: Registry = Registry::default();
     pub static ref FINISHED_JOBS: IntCounter =
         IntCounter::new("finished_jobs_total", "Total Finished Jobs")
-            .expect("Failed to create finished_jobs");
+            .expect("Failed to create finished_jobs_total");
     pub static ref FAILED_JOBS: IntCounter =
         IntCounter::new("failed_jobs_total", "Total Failed Jobs")
-            .expect("Failed to create failed_jobs");
+            .expect("Failed to create failed_jobs_total");
+    pub static ref RESULT_ERRORS: IntCounter =
+        IntCounter::new("result_errors_total", "Total Result Errors")
+            .expect("Failed to create result_errors_total");
+    pub static ref PENDING_JOBS: IntGauge =
+        IntGauge::new("pending_jobs", "Pending Jobs")
+            .expect("Failed to create pending_jobs");
+    pub static ref UNCLASSIFIED_ERRORS: IntCounter =
+        IntCounter::new("unclassified_errors_total", "Total Unclassified Errors")
+            .expect("Failed to create unclassified_errors_total");
 }
 
 #[tokio::main]
@@ -157,6 +166,7 @@ async fn run() -> Result<()> {
                                     redis_con.get(job_id.clone());
                                 if let Err(err) = assigned_event {
                                     tracing::error!("Can't find assign_event from job_id, {}", err);
+                                    UNCLASSIFIED_ERRORS.inc();
                                     continue;
                                 }
                                 let assign_event = assigned_event.unwrap();
@@ -168,10 +178,15 @@ async fn run() -> Result<()> {
                                     skip_pow_check == "true",
                                 );
 
+                                // ToDo: because of the way `validate_result_event` is written,
+                                //  it can be a failed job only when it's Ok(false). In case of
+                                //  Error, the only thing we can say it's a Result Error.
+                                //  `validate_result_event` needs to be re-written in a more compact way
+                                //  and return Result<()>: validation is either a success or error.
                                 match validate_result {
                                     Err(msg) => {
                                         tracing::error!("Validate error {}", msg.to_string());
-                                        FAILED_JOBS.inc();
+                                        RESULT_ERRORS.inc();
                                         continue;
                                     }
                                     Ok(res) => {
@@ -187,12 +202,15 @@ async fn run() -> Result<()> {
                                 let value = (job_id, (sender, payload, assign_event.id));
                                 if aggr_tx.send(value).await.is_err() {
                                     tracing::error!("Cannot send to aggregator task");
+                                    UNCLASSIFIED_ERRORS.inc();
                                 }
                             } else {
                                 tracing::error!("invalid tag");
+                                RESULT_ERRORS.inc();
                             }
                         } else {
                             tracing::error!("invalid content");
+                            RESULT_ERRORS.inc();
                         }
                     }
                     _ => tracing::error!("Wrong kind of event received"),
@@ -241,11 +259,16 @@ async fn run() -> Result<()> {
             let n_winners = match job_type {
                 0 => 1,
                 1 => 3,
-                _ => unreachable!(),
+                _ => {
+                    tracing::error!("Unknown job type");
+                    UNCLASSIFIED_ERRORS.inc();
+                    continue;
+                }
             };
 
             if new_payload.version != supported_version {
                 tracing::error!("Version mismatch");
+                UNCLASSIFIED_ERRORS.inc();
                 continue;
             }
 
@@ -266,8 +289,8 @@ async fn run() -> Result<()> {
                         FINISHED_JOBS.inc();
                     }
                     Err(err) => {
-                        // We log and that's it, we keep the entry in book for later inspection
                         tracing::error!("Cannot write finished job to db: {}", err);
+                        FAILED_JOBS.inc();
                     }
                 }
                 continue;
@@ -283,12 +306,14 @@ async fn run() -> Result<()> {
                         //  handle resolutions now? Do we need a separate book to handle
                         //  controversies?
                         tracing::error!("payloads for {} are different", job_id);
+                        RESULT_ERRORS.inc();
 
                         // ToDo: Currently we handle disputes by deleting the entry altogether.
                         //  If this was already at the second result, another one will come and
                         //  linger in the book because no other matches are expected to come.
                         //  Another approach needs to decided.
                         entry.remove();
+                        PENDING_JOBS.set(entry.len()as i64);
                         continue;
                     }
 
@@ -313,10 +338,12 @@ async fn run() -> Result<()> {
                             Ok(_) => {
                                 FINISHED_JOBS.inc();
                                 entry.remove(); // Remove only if we know it's safe in db
+                                PENDING_JOBS.set(entry.len() as i64);
                             }
                             Err(err) => {
                                 // We log and that's it, we keep the entry in book for later inspection
                                 tracing::error!("Cannot write finished job to db: {}", err);
+                                FAILED_JOBS.inc();
                             }
                         }
                     }
@@ -324,6 +351,7 @@ async fn run() -> Result<()> {
                 Entry::Vacant(entry) => {
                     tracing::debug!("First time we see job {}", job_id);
                     entry.insert((vec![sender], new_payload));
+                    PENDING_JOBS.set(entry.len() as i64);
                 }
             }
         }
