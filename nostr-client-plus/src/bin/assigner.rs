@@ -417,6 +417,7 @@ fn get_workers(book: &mut WorkersBook, num_workers: NumWorkers) -> Option<Vec<Se
                 book.insert(w, last_valid_instant);
             }
             tracing::warn!("Stale workers, trimmed");
+            WORKERS_ONLINE.set(book.len() as i64);
             return None;
         }
         last_valid_instant = inst;

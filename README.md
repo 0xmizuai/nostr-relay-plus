@@ -38,10 +38,11 @@ Logging is controlled by `RUST_LOG` (compliant with `env_logger` syntax) and `LO
 
 For example
 ```shell
-RUST_LOG=warn
-LOG_FORMAT=json 
+RUST_LOG=warn # default is info
+LOG_FORMAT=json_flatten # default is full, that is human-readable
 ```
-will set the max log level to WARN and format using a machine parsable json.  
-Default is INFO and full format, that is human-readable.
+will set the max log level to WARN and format using a machine parsable flatten json.  
+For `RUST_LOG` accepted format and options, see `env_logger` and `tracing::EnvFilter` documentation.  
+For `LOG_FORMAT` options are: `json`, `json_flatten`, `compact`, `pretty` and anything else defaults to full format.
 
 **SURREAL_URL** must be a wss address.
