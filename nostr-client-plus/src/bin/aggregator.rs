@@ -411,11 +411,20 @@ fn get_result_payload(ev: &RelayEvent) -> Result<ResultPayload> {
 fn register_metrics() {
     REGISTRY
         .register(Box::new(FINISHED_JOBS.clone()))
-        .expect("Cannot register finished_jobs");
+        .expect("Cannot register FINISHED_JOBS");
 
     REGISTRY
         .register(Box::new(FAILED_JOBS.clone()))
-        .expect("Cannot register failed_jobs");
+        .expect("Cannot register FAILED_JOBS");
+    REGISTRY.
+        register(Box::new(RESULT_ERRORS.clone()))
+        .expect("Cannot register RESULT_ERRORS");
+    REGISTRY
+        .register(Box::new(PENDING_JOBS.clone()))
+        .expect("Cannot register PENDING_JOBS");
+    REGISTRY
+        .register(Box::new(UNCLASSIFIED_ERRORS.clone()))
+        .expect("Cannot register UNCLASSIFIED_ERRORS");
 }
 
 fn save_event_to_redis(redis_con: &mut Connection, event: EventOnWire) -> Result<()> {
