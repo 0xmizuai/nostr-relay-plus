@@ -313,7 +313,7 @@ async fn run() -> Result<()> {
                         //  linger in the book because no other matches are expected to come.
                         //  Another approach needs to decided.
                         entry.remove();
-                        PENDING_JOBS.set(entry.len()as i64);
+                        PENDING_JOBS.set(aggr_book.len()as i64);
                         continue;
                     }
 
@@ -338,7 +338,7 @@ async fn run() -> Result<()> {
                             Ok(_) => {
                                 FINISHED_JOBS.inc();
                                 entry.remove(); // Remove only if we know it's safe in db
-                                PENDING_JOBS.set(entry.len() as i64);
+                                PENDING_JOBS.set(aggr_book.len() as i64);
                             }
                             Err(err) => {
                                 // We log and that's it, we keep the entry in book for later inspection
@@ -351,7 +351,7 @@ async fn run() -> Result<()> {
                 Entry::Vacant(entry) => {
                     tracing::debug!("First time we see job {}", job_id);
                     entry.insert((vec![sender], new_payload));
-                    PENDING_JOBS.set(entry.len() as i64);
+                    PENDING_JOBS.set(aggr_book.len() as i64);
                 }
             }
         }
