@@ -6,7 +6,7 @@ use nostr_client_plus::__private::errors::Unrecoverable;
 use nostr_client_plus::__private::metrics::get_metrics_app;
 use nostr_client_plus::client::Client;
 use nostr_client_plus::event::UnsignedEvent;
-use nostr_client_plus::job_protocol::{JobType, Kind};
+use nostr_client_plus::job_protocol::{JobType, Kind, AssignerTask, AssignerTaskStatus, NewJobPayload};
 use nostr_client_plus::request::{Filter, Request};
 use nostr_crypto::eoa_signer::EoaSigner;
 use nostr_crypto::sender_signer::SenderSigner;
@@ -15,7 +15,7 @@ use nostr_plus_common::relay_event::RelayEvent;
 use nostr_plus_common::relay_message::RelayMessage;
 use nostr_plus_common::sender::Sender;
 use prometheus::{IntCounter, IntGauge, Registry};
-use serde_json::json;
+use serde_json::{json, from_str};
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -24,6 +24,11 @@ use tokio::sync::Mutex;
 use tokio::time::{interval, sleep};
 use tokio_tungstenite::tungstenite::Message;
 use nostr_plus_common::logging::init_tracing;
+use mongodb::{Client as DbClient, Collection, bson::{doc, Document}};
+use mongodb::bson::DateTime;
+use nostr_client_plus::db::RawDataEntry;
+use nostr_plus_common::types::Timestamp;
+use chrono::{Utc, Timelike};
 
 mod utils;
 use crate::utils::get_single_tag_entry;
@@ -66,6 +71,14 @@ async fn run() -> Result<()> {
     let relay_url = std::env::var("RELAY_URL").unwrap_or("ws://127.0.0.1:3033".to_string());
     let raw_private_key = std::env::var("ASSIGNER_PRIVATE_KEY").expect("Missing private key");
     let min_hb = std::env::var("MIN_HB_VERSION").expect("Missing min HB version");
+    let db_url = std::env::var("MONGO_URL").expect("MONGO_URL is not set");
+
+    // Init mongo db instance
+    let db = DbClient::with_uri_str(db_url)
+        .await
+        .expect("Cannot connect to db")
+        .database("assigner");
+    let collection: Collection<AssignerTask> = db.collection::<AssignerTask>("tasks");
 
     // Command line parsing
     let args: Vec<String> = std::env::args().collect();
@@ -158,9 +171,23 @@ async fn run() -> Result<()> {
                 Some((workers, ev)) = pub_rx.recv() => {
                     tracing::debug!(r#"Sending "{}""#, ev.event.content);
                     let mut tags: Vec<Vec<String>> = Vec::with_capacity(workers.len());
+                    let mut tasks: Vec<AssignerTask> = Vec::with_capacity(workers.len());
+                    let event: NewJobPayload = from_str(ev.event.content.as_str()).unwrap();
+                    let date: DateTime = DateTime::now();
                     tags.push(vec!["e".to_string(), hex::encode(ev.event.id)]);
+                    tracing::debug!("======================================");
+                    tracing::debug!("Event id: {}", hex::encode(ev.event.id));
+                    tracing::debug!("======================================");
                     for w in &workers {
                         tags.push(vec!["p".to_string(), hex::encode(w.to_bytes())]);
+                        tasks.push(AssignerTask {
+                            worker: w.clone(),
+                            event_id: event.header.raw_data_id.to_string(),
+                            status: AssignerTaskStatus::Pending,
+                            created_at: Utc::now().timestamp() as u64,
+                            expires_at: (Utc::now() + chrono::Duration::hours(1)).timestamp() as u64,
+                            result: "".to_string(),
+                        });
                     }
                     let timestamp = chrono::Utc::now().timestamp() as u64;
                     let event = UnsignedEvent::new(
@@ -209,6 +236,8 @@ async fn run() -> Result<()> {
                             let mut assigned_senders = (&mut assigned_senders).lock().await;
                             assigned_senders.insert(w.clone(), current_instant);
                         }
+                        // Record down all tasks get assigned
+                        collection.insert_many(tasks, None).await.expect("Failed to insert assigner tasks into mongo database");
                         ASSIGNED_JOBS.inc();
                     }
                 }
