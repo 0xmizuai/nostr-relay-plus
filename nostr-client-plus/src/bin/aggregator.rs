@@ -1,17 +1,22 @@
 use anyhow::{anyhow, Result};
+use chrono::Utc;
+use futures_util::TryStreamExt;
 use lazy_static::lazy_static;
-use mongodb::bson::{doc, Document, to_bson};
+use mongodb::bson::{doc, to_bson, Document};
 use mongodb::{Client as DbClient, Collection};
 use nostr_client_plus::__private::config::{load_config, AggregatorConfig};
 use nostr_client_plus::__private::metrics::get_metrics_app;
 use nostr_client_plus::client::Client;
 use nostr_client_plus::db::FinishedJobs;
-use nostr_client_plus::job_protocol::{Kind, ResultPayload, AssignerTask, AssignerTaskStatus, NewJobPayload};
+use nostr_client_plus::job_protocol::{
+    AssignerTask, AssignerTaskStatus, ClassifierJobOutput, Kind, NewJobPayload, ResultPayload,
+};
 use nostr_client_plus::redis::RedisEventOnWire;
 use nostr_client_plus::request::{Filter, Request};
 use nostr_crypto::eoa_signer::EoaSigner;
 use nostr_crypto::sender_signer::SenderSigner;
 use nostr_plus_common::binary_protocol::BinaryMessage;
+use nostr_plus_common::logging::init_tracing;
 use nostr_plus_common::relay_event::RelayEvent;
 use nostr_plus_common::relay_message::RelayMessage;
 use nostr_plus_common::sender::Sender;
@@ -21,14 +26,11 @@ use redis::{Commands, Connection, RedisError};
 use sha2::{Digest, Sha512};
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap};
+use std::format;
 use std::sync::Arc;
 use std::time::Duration;
-use std::format;
-use chrono::Utc;
-use futures_util::TryStreamExt;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
-use nostr_plus_common::logging::init_tracing;
 
 mod utils;
 use crate::utils::{get_private_key_from_name, get_single_tag_entry};
@@ -117,7 +119,8 @@ async fn run() -> Result<()> {
         .expect("Cannot connect to db");
     let db = connection.database("mine_local");
     let collection: Collection<FinishedJobs> = db.collection("finished_jobs");
-    let task_collection: Collection<AssignerTask> = connection.database("assigner").collection("tasks");
+    let task_collection: Collection<AssignerTask> =
+        connection.database("assigner").collection("tasks");
 
     // Configure Redis
     let redis_url = std::env::var("REDIS_URL").expect("REDIS_URL is not set");
@@ -286,7 +289,14 @@ async fn run() -> Result<()> {
             if (job_type == 1) {
                 event_ids.push(payload.header.raw_data_id.to_string());
                 classifier_aggregate(&sender, &payload, &task_collection).await;
-                finalize_classification(assign_event_id, &payload, vec![payload.header.raw_data_id.to_string()], &task_collection, &collection).await;
+                finalize_classification(
+                    assign_event_id,
+                    &payload,
+                    vec![payload.header.raw_data_id.to_string()],
+                    &task_collection,
+                    &collection,
+                )
+                .await;
                 continue;
             }
 
@@ -345,6 +355,7 @@ async fn run() -> Result<()> {
                         // Use job_type as 0 since this is a pow work
                         if reward(assign_event_id, workers, new_payload, &collection, 0).await {
                             entry.remove(); // Remove only if we know it's safe in db
+                            PENDING_JOBS.set(aggr_book.len() as i64);
                         }
                     }
                 }
@@ -403,7 +414,13 @@ async fn run() -> Result<()> {
     Ok(())
 }
 
-async fn finalize_classification(assign_event_id: String, payload: &ResultPayload, event_ids: Vec<String>, collection: &Collection<AssignerTask>, finish_job_collection: &Collection<FinishedJobs>) {
+async fn finalize_classification(
+    assign_event_id: String,
+    payload: &ResultPayload,
+    event_ids: Vec<String>,
+    collection: &Collection<AssignerTask>,
+    finish_job_collection: &Collection<FinishedJobs>,
+) {
     tracing::debug!("Finalizing classifications for events: {:?}", event_ids);
     let filter = doc! {
         "event_id": {
@@ -411,13 +428,19 @@ async fn finalize_classification(assign_event_id: String, payload: &ResultPayloa
         },
     };
 
-    let mut cursor = collection.find(filter, None).await.expect("Failed to finalize classifications");
+    let mut cursor = collection
+        .find(filter, None)
+        .await
+        .expect("Failed to finalize classifications");
     let mut tasks_by_event: HashMap<String, Vec<AssignerTask>> = HashMap::new();
     while let Some(task) = cursor.try_next().await.unwrap() {
         if !tasks_by_event.contains_key(task.event_id.as_str()) {
             tasks_by_event.insert(task.event_id.to_string(), vec![]);
         }
-        tasks_by_event.get_mut(task.event_id.as_str()).unwrap().push(task);
+        tasks_by_event
+            .get_mut(task.event_id.as_str())
+            .unwrap()
+            .push(task);
     }
 
     for event_id in tasks_by_event.keys() {
@@ -430,18 +453,26 @@ async fn finalize_classification(assign_event_id: String, payload: &ResultPayloa
                 processing_count += 1;
                 break;
             }
-            match answers.entry(task.result.clone()) {
-                Entry::Occupied(mut entry) => {
-                    entry.insert(entry.get() + 1);
+            let result_arr: Vec<ClassifierJobOutput> =
+                serde_json::from_str(task.result.as_str()).unwrap_or(vec![]);
+            let answer = result_arr.get(0);
+            match answer {
+                None => {
+                    break;
                 }
-                Entry::Vacant(entry) => {
-                    entry.insert(1);
-                }
+                Some(answer) => match answers.entry(answer.tag_id.to_string()) {
+                    Entry::Occupied(mut entry) => {
+                        entry.insert(entry.get() + 1);
+                    }
+                    Entry::Vacant(entry) => {
+                        entry.insert(1);
+                    }
+                },
             }
         }
         if processing_count > 0 {
             tracing::debug!("Waiting for more results for event id: {}", event_id);
-            continue
+            continue;
         }
         tracing::debug!("All results has been collected for event id: {}", event_id);
         // max_count count number of results having same max count
@@ -453,7 +484,7 @@ async fn finalize_classification(assign_event_id: String, payload: &ResultPayloa
             let count = answers.get(result).unwrap().to_owned();
             if count == max_answer {
                 max_count += 1;
-            } else if  { count > max_answer } {
+            } else if { count > max_answer } {
                 max_count = 1;
                 max_answer = count;
                 answer = result.clone();
@@ -502,61 +533,93 @@ async fn finalize_classification(assign_event_id: String, payload: &ResultPayloa
             }
             tracing::debug!("Winners: {:?}", winners);
             // job_type 1 as classifier
-            reward(assign_event_id.clone(), &winners, payload.clone(), finish_job_collection, 1).await;
+            reward(
+                assign_event_id.clone(),
+                &winners,
+                payload.clone(),
+                finish_job_collection,
+                1,
+            )
+            .await;
         }
         // TODO(wangjun.hong): Replace below with a single update
-        collection.insert_many(tasks_to_update, None).await.expect("Failed to update tasks");
+        collection
+            .insert_many(tasks_to_update, None)
+            .await
+            .expect("Failed to update tasks");
         let delete_filter = doc! {
-                "event_id": event_id,
-                "status": {
-                    "$in": [
-                        "Pending",
-                    ],
-                }
-            };
-        collection.delete_many(delete_filter, None).await.expect("Failed to delete tasks");
+            "event_id": event_id,
+            "status": {
+                "$in": [
+                    "Pending",
+                ],
+            }
+        };
+        collection
+            .delete_many(delete_filter, None)
+            .await
+            .expect("Failed to delete tasks");
     }
 }
 
-async fn reward(assign_event_id: String, workers: &Vec<Sender>, payload: ResultPayload, collection: &Collection<FinishedJobs>, job_type: u16) -> bool {
-    tracing::debug!("All the results for {} are consistent, sending", job_id);
-    let raw_data_id = new_payload.header.raw_data_id.clone();
+async fn reward(
+    assign_event_id: String,
+    workers: &Vec<Sender>,
+    payload: ResultPayload,
+    collection: &Collection<FinishedJobs>,
+    job_type: u16,
+) -> bool {
+    tracing::debug!("All the results for {} are consistent, sending", assign_event_id);
+    let raw_data_id = payload.header.raw_data_id.clone();
     let db_entry = FinishedJobs {
         _id: raw_data_id,
         workers: workers.clone(), // if we remove first, no need to clone but this is safer
         timestamp: chrono::Utc::now().timestamp() as u64,
-        result: new_payload,
+        result: payload,
         job_type,
         assign_event_id,
     };
+    tracing::debug!(
+        "Rewarding all workers for data: {}",
+        raw_data_id.to_string()
+    );
     match collection.insert_one(db_entry, None).await {
         Ok(_) => {
             FINISHED_JOBS.inc();
-            PENDING_JOBS.set(aggr_book.len() as i64);
+            true
         }
         Err(err) => {
             // We log and that's it, we keep the entry in book for later inspection
             tracing::error!("Cannot write finished job to db: {}", err);
             FAILED_JOBS.inc();
+            false
         }
     }
 }
 
-async fn classifier_aggregate(sender: &Sender, payload: &ResultPayload, collection: &Collection<AssignerTask>) {
+async fn classifier_aggregate(
+    sender: &Sender,
+    payload: &ResultPayload,
+    collection: &Collection<AssignerTask>,
+) {
     let filter = doc! {
-                "event_id": payload.header.raw_data_id.to_string(),
-                "worker": hex::encode(sender.to_bytes()),
-            };
+        "event_id": payload.header.raw_data_id.to_string(),
+        "worker": hex::encode(sender.to_bytes()),
+    };
 
-    tracing::debug!("Event id: {}, worker id: {}", payload.header.raw_data_id.to_string(), hex::encode(sender.to_bytes()));
+    tracing::debug!(
+        "Event id: {}, worker id: {}",
+        payload.header.raw_data_id.to_string(),
+        hex::encode(sender.to_bytes())
+    );
 
-    let task = collection.find_one(
-        filter.clone(),
-        None,
-    ).await.unwrap();
+    let task = collection.find_one(filter.clone(), None).await.unwrap();
 
     if (task.is_none()) {
-        tracing::error!("No task found for worker: {}", hex::encode(sender.to_bytes()));
+        tracing::error!(
+            "No task found for worker: {}",
+            hex::encode(sender.to_bytes())
+        );
         return;
     }
 
@@ -565,19 +628,36 @@ async fn classifier_aggregate(sender: &Sender, payload: &ResultPayload, collecti
     let worker_task = task.unwrap();
 
     let current_timestamp = Utc::now().timestamp() as u64;
-    let mongo_error_message = format!("Failed to update task for event: {}, worker: {}", payload.header.raw_data_id.to_string(), hex::encode(sender.to_bytes()));
+    let mongo_error_message = format!(
+        "Failed to update task for event: {}, worker: {}",
+        payload.header.raw_data_id.to_string(),
+        hex::encode(sender.to_bytes())
+    );
 
-    tracing::debug!("Current timestamp: {}, expires at: {}", current_timestamp, worker_task.expires_at);
+    tracing::debug!(
+        "Current timestamp: {}, expires at: {}",
+        current_timestamp,
+        worker_task.expires_at
+    );
     if ((worker_task.expires_at as u64) < current_timestamp) {
-        tracing::error!("Task: {} is timed out", payload.header.raw_data_id.to_string());
+        tracing::error!(
+            "Task: {} is timed out",
+            payload.header.raw_data_id.to_string()
+        );
         // Timeout should be AssignerTaskStatus::Timeout
         let update = doc! {"$set": {"status": "Timeout"}};
-        collection.update_one(filter.clone(), update, None).await.expect(mongo_error_message.as_str());
-        return
+        collection
+            .update_one(filter.clone(), update, None)
+            .await
+            .expect(mongo_error_message.as_str());
+        return;
     }
 
     let update = doc! {"$set": {"result": payload.output.clone()}};
-    collection.update_one(filter.clone(), update, None).await.expect(mongo_error_message.as_str());
+    collection
+        .update_one(filter.clone(), update, None)
+        .await
+        .expect(mongo_error_message.as_str());
 }
 
 fn get_result_payload(ev: &RelayEvent) -> Result<ResultPayload> {

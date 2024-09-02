@@ -1,9 +1,9 @@
 use crate::crypto::CryptoHash;
+use nostr_plus_common::sender::Sender;
 use nostr_plus_common::types::Timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::Number;
 use strum_macros::{AsRefStr, EnumString};
-use nostr_plus_common::sender::Sender;
 
 // ToDo: this just a placeholder struct
 #[derive(Serialize, Deserialize)]
@@ -23,11 +23,11 @@ pub enum Kind {
 #[repr(u16)]
 #[derive(Serialize, Deserialize, PartialEq)]
 pub enum AssignerTaskStatus {
-    Pending= 1,
-    Succeeded=2,
-    Failed=3,
-    Retry=4,
-    Timeout=5,
+    Pending = 1,
+    Succeeded = 2,
+    Failed = 3,
+    Retry = 4,
+    Timeout = 5,
 }
 
 impl Kind {
@@ -71,6 +71,11 @@ pub struct ResultPayload {
     pub header: PayloadHeader,
     pub output: String,
     pub version: String,
+}
+
+#[derive(PartialEq, Eq, Serialize, Deserialize, Clone)]
+pub struct ClassifierJobOutput {
+    pub tag_id: u16,
 }
 
 #[derive(AsRefStr, EnumString, PartialEq)]
