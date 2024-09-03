@@ -102,6 +102,22 @@ impl JobType {
     }
 }
 
+impl AssignerTask {
+    pub fn get_result_identifier(&self) -> String {
+        let result_arr: Vec<ClassifierJobOutput> =
+            serde_json::from_str(self.result.as_str()).unwrap_or(vec![]);
+        let answer = result_arr.get(0);
+        match answer {
+            None => {
+                return "".to_string();
+            }
+            Some(answer) => {
+                return answer.tag_id.to_string();
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::job_protocol::JobType;

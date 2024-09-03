@@ -51,8 +51,7 @@ lazy_static! {
         IntCounter::new("result_errors_total", "Total Result Errors")
             .expect("Failed to create result_errors_total");
     pub static ref PENDING_JOBS: IntGauge =
-        IntGauge::new("pending_jobs", "Pending Jobs")
-            .expect("Failed to create pending_jobs");
+        IntGauge::new("pending_jobs", "Pending Jobs").expect("Failed to create pending_jobs");
     pub static ref UNCLASSIFIED_ERRORS: IntCounter =
         IntCounter::new("unclassified_errors_total", "Total Unclassified Errors")
             .expect("Failed to create unclassified_errors_total");
@@ -341,7 +340,7 @@ async fn run() -> Result<()> {
                         //  linger in the book because no other matches are expected to come.
                         //  Another approach needs to decided.
                         entry.remove();
-                        PENDING_JOBS.set(aggr_book.len()as i64);
+                        PENDING_JOBS.set(aggr_book.len() as i64);
                         continue;
                     }
 
@@ -453,21 +452,17 @@ async fn finalize_classification(
                 processing_count += 1;
                 break;
             }
-            let result_arr: Vec<ClassifierJobOutput> =
-                serde_json::from_str(task.result.as_str()).unwrap_or(vec![]);
-            let answer = result_arr.get(0);
-            match answer {
-                None => {
-                    break;
-                }
-                Some(answer) => match answers.entry(answer.tag_id.to_string()) {
+            let result_identifier = task.get_result_identifier();
+            tracing::info!("result_identifier: {}", result_identifier.to_string());
+            if !result_identifier.is_empty() {
+                match answers.entry(result_identifier) {
                     Entry::Occupied(mut entry) => {
                         entry.insert(entry.get() + 1);
                     }
                     Entry::Vacant(entry) => {
                         entry.insert(1);
                     }
-                },
+                }
             }
         }
         if processing_count > 0 {
@@ -510,7 +505,8 @@ async fn finalize_classification(
             // Now let's award the winners
             let mut winners: Vec<Sender> = vec![];
             for task in tasks_by_event.get(event_id).unwrap() {
-                if task.result == answer {
+                let result_identifier = task.get_result_identifier();
+                if result_identifier == answer {
                     tasks_to_update.push(AssignerTask {
                         worker: task.worker.clone(),
                         event_id: task.event_id.clone(),
@@ -521,6 +517,8 @@ async fn finalize_classification(
                     });
                     winners.push(task.worker.clone());
                 } else if !task.result.is_empty() {
+                    tracing::debug!("result_identifier: {}", result_identifier);
+                    tracing::debug!("answer: {}", answer);
                     tasks_to_update.push(AssignerTask {
                         worker: task.worker.clone(),
                         event_id: task.event_id.clone(),
@@ -569,7 +567,10 @@ async fn reward(
     collection: &Collection<FinishedJobs>,
     job_type: u16,
 ) -> bool {
-    tracing::debug!("All the results for {} are consistent, sending", assign_event_id);
+    tracing::debug!(
+        "All the results for {} are consistent, sending",
+        assign_event_id
+    );
     let raw_data_id = payload.header.raw_data_id.clone();
     let db_entry = FinishedJobs {
         _id: raw_data_id,
@@ -673,8 +674,8 @@ fn register_metrics() {
     REGISTRY
         .register(Box::new(FAILED_JOBS.clone()))
         .expect("Cannot register FAILED_JOBS");
-    REGISTRY.
-        register(Box::new(RESULT_ERRORS.clone()))
+    REGISTRY
+        .register(Box::new(RESULT_ERRORS.clone()))
         .expect("Cannot register RESULT_ERRORS");
     REGISTRY
         .register(Box::new(PENDING_JOBS.clone()))
