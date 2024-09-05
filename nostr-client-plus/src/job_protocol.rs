@@ -2,7 +2,8 @@ use crate::crypto::CryptoHash;
 use nostr_plus_common::sender::Sender;
 use nostr_plus_common::types::Timestamp;
 use serde::{Deserialize, Serialize};
-use serde_json::Number;
+use anyhow::Result;
+use redis_macros::{FromRedisValue, ToRedisArgs};
 use strum_macros::{AsRefStr, EnumString};
 
 // ToDo: this just a placeholder struct
@@ -47,14 +48,12 @@ pub struct PayloadHeader {
     pub time: Timestamp,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, FromRedisValue, ToRedisArgs, Clone)]
 pub struct AssignerTask {
     pub worker: Sender,
     pub event_id: String,
-    pub status: AssignerTaskStatus,
-    pub created_at: Timestamp,
-    pub expires_at: Timestamp,
-    pub result: String,
+    pub result: ResultPayload,
+    // TODO(wangjun.hong): Figure out how to support timeout and retry
 }
 
 #[derive(Serialize, Deserialize)]
@@ -73,7 +72,7 @@ pub struct ResultPayload {
     pub version: String,
 }
 
-#[derive(PartialEq, Eq, Serialize, Deserialize, Clone)]
+#[derive(PartialEq, Serialize, Deserialize, Clone)]
 pub struct ClassifierJobOutput {
     pub tag_id: u16,
 }
@@ -97,7 +96,7 @@ impl JobType {
     pub fn workers(&self) -> usize {
         match self {
             JobType::PoW => 1,
-            JobType::Classification => 3,
+            JobType::Classification => 2,
         }
     }
 }
@@ -108,16 +107,17 @@ impl AssignerTask {
      * result example: [{"tag_id":2867,"distance":0.5045340279460676}]
      * return example: 2867
      */
-    pub fn get_result_identifier(&self) -> Option<String> {
+    pub fn get_result_identifier(&self) -> Result<Option<String>> {
+        tracing::debug!("output: {}", self.result.output);
         let result_arr: Vec<ClassifierJobOutput> =
-            serde_json::from_str(self.result.as_str()).unwrap_or(vec![]);
+            serde_json::from_str(self.result.output.as_str())?;
         let answer = result_arr.get(0);
         match answer {
             None => {
-                return None;
+                Ok(None)
             }
             Some(answer) => {
-                return Some(answer.tag_id.to_string());
+                Ok(Some(answer.tag_id.to_string()))
             }
         }
     }

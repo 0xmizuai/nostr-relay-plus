@@ -2,14 +2,14 @@ use anyhow::{anyhow, Result};
 use chrono::Utc;
 use futures_util::TryStreamExt;
 use lazy_static::lazy_static;
-use mongodb::bson::{doc, to_bson, Document};
+use mongodb::bson::{doc};
 use mongodb::{Client as DbClient, Collection};
 use nostr_client_plus::__private::config::{load_config, AggregatorConfig};
 use nostr_client_plus::__private::metrics::get_metrics_app;
 use nostr_client_plus::client::Client;
 use nostr_client_plus::db::FinishedJobs;
 use nostr_client_plus::job_protocol::{
-    AssignerTask, AssignerTaskStatus, ClassifierJobOutput, Kind, NewJobPayload, ResultPayload,
+    AssignerTask, AssignerTaskStatus, Kind, ResultPayload,
 };
 use nostr_client_plus::redis::RedisEventOnWire;
 use nostr_client_plus::request::{Filter, Request};
@@ -26,9 +26,11 @@ use redis::{Commands, Connection, RedisError};
 use sha2::{Digest, Sha512};
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap};
-use std::format;
+use std::os::macos::raw::stat;
 use std::sync::Arc;
 use std::time::Duration;
+use std::vec;
+use chrono::SecondsFormat::AutoSi;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -51,7 +53,8 @@ lazy_static! {
         IntCounter::new("result_errors_total", "Total Result Errors")
             .expect("Failed to create result_errors_total");
     pub static ref PENDING_JOBS: IntGauge =
-        IntGauge::new("pending_jobs", "Pending Jobs").expect("Failed to create pending_jobs");
+        IntGauge::new("pending_jobs", "Pending Jobs")
+            .expect("Failed to create pending_jobs");
     pub static ref UNCLASSIFIED_ERRORS: IntCounter =
         IntCounter::new("unclassified_errors_total", "Total Unclassified Errors")
             .expect("Failed to create unclassified_errors_total");
@@ -258,15 +261,13 @@ async fn run() -> Result<()> {
 
         // keep track of results for matching
         let mut aggr_book: HashMap<String, (Vec<Sender>, ResultPayload)> = HashMap::new();
-        let mut event_ids: Vec<String> = vec![];
 
         while let Some((job_id, (sender, new_payload, assign_event_id))) = aggr_rx.recv().await {
-            tracing::debug!("======================================");
             tracing::debug!("Assign Event id: {}", assign_event_id);
             tracing::debug!("Job id: {}", job_id);
-            tracing::debug!("======================================");
             // TODO: parse JobType
             let job_type = new_payload.header.job_type;
+            tracing::debug!("Job type: {}", job_type);
             let n_winners = match job_type {
                 0 => 1,
                 1 => 3,
@@ -276,32 +277,16 @@ async fn run() -> Result<()> {
                     continue;
                 }
             };
-            let payload = new_payload.clone();
 
-            if payload.version != supported_version {
+            if new_payload.version != supported_version {
                 tracing::error!("Version mismatch");
                 UNCLASSIFIED_ERRORS.inc();
                 continue;
             }
 
-            // job_type 1 is classifier
-            if (job_type == 1) {
-                event_ids.push(payload.header.raw_data_id.to_string());
-                classifier_aggregate(&sender, &payload, &task_collection).await;
-                finalize_classification(
-                    assign_event_id,
-                    &payload,
-                    vec![payload.header.raw_data_id.to_string()],
-                    &task_collection,
-                    &collection,
-                )
-                .await;
-                continue;
-            }
-
             if n_winners <= 1 {
                 tracing::debug!("The job needs only one worker! {}", job_id);
-                let raw_data_id = payload.header.raw_data_id.clone();
+                let raw_data_id = new_payload.header.raw_data_id.clone();
                 let db_entry = FinishedJobs {
                     _id: raw_data_id,
                     workers: vec![sender.clone()], // if we remove first, no need to clone but this is safer
@@ -323,46 +308,57 @@ async fn run() -> Result<()> {
                 continue;
             }
 
-            match aggr_book.entry(job_id.clone()) {
-                Entry::Occupied(mut entry) => {
-                    tracing::debug!("Another result for job {} found", job_id);
-                    let (workers, payload) = entry.get_mut();
+            // Falling below are logics for classification
+            let raw_data_id = hex::encode(new_payload.header.raw_data_id.hash());
+            let saved_tasks: Result<Vec<AssignerTask>, RedisError> =
+                redis_con.get(job_id.clone());
+            let mut tasks: Vec<AssignerTask> = match saved_tasks {
+                Ok(val) => {
+                    val
+                }
+                Err(_) => {
+                    Vec::new()
+                }
+            };
 
-                    if *payload != new_payload {
-                        // ToDo: here the logic can be complicated. For example, how do we
-                        //  handle resolutions now? Do we need a separate book to handle
-                        //  controversies?
-                        tracing::error!("payloads for {} are different", job_id);
+            tasks.push(
+                AssignerTask {
+                    worker: sender,
+                    event_id: raw_data_id.clone(),
+                    result: new_payload,
+                }
+            );
+
+            if tasks.len() == n_winners {
+                // TODO(wangjun.hong): Remove key from redis
+                // match redis_con.del(raw_data_id) {
+                //     Ok(_) => {
+                //         tracing::debug!("Removed all entries from redis for key: {}", raw_data_id);
+                //     }
+                //     Err(_) => {
+                //         tracing::error!("Failed to remove all entries from redis for key: {}", raw_data_id);
+                //     }
+                // }
+                match finalize_classification(
+                    &tasks,
+                    assign_event_id,
+                    &collection,
+                ).await {
+                    Ok(_) => {
+                        tracing::debug!("Successfully finalized data: {}", raw_data_id);
+                    }
+                    Err(_) => {
+                        tracing::debug!("Failed to finalized data: {}", raw_data_id);
                         RESULT_ERRORS.inc();
-
-                        // ToDo: Currently we handle disputes by deleting the entry altogether.
-                        //  If this was already at the second result, another one will come and
-                        //  linger in the book because no other matches are expected to come.
-                        //  Another approach needs to decided.
-                        entry.remove();
-                        PENDING_JOBS.set(aggr_book.len() as i64);
-                        continue;
                     }
+                };
+                PENDING_JOBS.dec();
+            } else {
+                redis_con.set(job_id.clone(), tasks);
+            }
 
-                    // Ok, they are the same
-                    workers.push(sender);
-                    // We allow the case of len > N_WORKERS for cases where there are issues
-                    // writing to the db or removing from book.
-                    // The first N_WINNERS are still the same in the DB, regardless.
-
-                    if workers.len() >= n_winners {
-                        // Use job_type as 0 since this is a pow work
-                        if reward(assign_event_id, workers, new_payload, &collection, 0).await {
-                            entry.remove(); // Remove only if we know it's safe in db
-                            PENDING_JOBS.set(aggr_book.len() as i64);
-                        }
-                    }
-                }
-                Entry::Vacant(entry) => {
-                    tracing::debug!("First time we see job {}", job_id);
-                    entry.insert((vec![sender], new_payload));
-                    PENDING_JOBS.set(aggr_book.len() as i64);
-                }
+            if tasks.len() == 1 {
+                PENDING_JOBS.inc();
             }
         }
     });
@@ -414,150 +410,101 @@ async fn run() -> Result<()> {
 }
 
 async fn finalize_classification(
+    tasks: &Vec<AssignerTask>,
     assign_event_id: String,
-    payload: &ResultPayload,
-    event_ids: Vec<String>,
-    collection: &Collection<AssignerTask>,
-    finish_job_collection: &Collection<FinishedJobs>,
-) {
-    tracing::debug!("Finalizing classifications for events: {:?}", event_ids);
-    let filter = doc! {
-        "event_id": {
-            "$in": event_ids,
-        },
-    };
+    collection: &Collection<FinishedJobs>,
+) -> Result<()> {
+    tracing::debug!("Finalizing classifications for event: {}", assign_event_id);
+    let mut answers: HashMap<String, i32> = HashMap::new();
 
-    let mut cursor = collection
-        .find(filter, None)
-        .await
-        .expect("Failed to finalize classifications");
-    let mut tasks_by_event: HashMap<String, Vec<AssignerTask>> = HashMap::new();
-    while let Some(task) = cursor.try_next().await.unwrap() {
-        if !tasks_by_event.contains_key(task.event_id.as_str()) {
-            tasks_by_event.insert(task.event_id.to_string(), vec![]);
+    // Let's first go through all tasks and construct a map of
+    // answer -> count
+    for task in tasks.iter() {
+        match answers.entry(serde_json::json!(task.result.clone()).to_string()) {
+            Entry::Occupied(mut entry) => {
+                entry.insert(entry.get() + 1);
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(1);
+            }
         }
-        tasks_by_event
-            .get_mut(task.event_id.as_str())
-            .unwrap()
-            .push(task);
     }
 
-    for event_id in tasks_by_event.keys() {
-        tracing::debug!("Event id: {}", event_id);
-        let mut processing_count = 0;
-        let mut answers: HashMap<String, i32> = HashMap::new();
-        for task in tasks_by_event.get(event_id).unwrap() {
-            tracing::debug!("Worker id: {}", hex::encode(task.worker.to_bytes()));
-            if task.result.is_empty() && task.status == AssignerTaskStatus::Pending {
-                processing_count += 1;
-                break;
-            }
-            let result_identifier = task.get_result_identifier();
-            if let Some(identifier) = result_identifier {
-                if !identifier.is_empty() {
-                    match answers.entry(identifier) {
-                        Entry::Occupied(mut entry) => {
-                            entry.insert(entry.get() + 1);
-                        }
-                        Entry::Vacant(entry) => {
-                            entry.insert(1);
-                        }
-                    }
-                }
-            }
+    // Let's check if there's a answer which majority of the tasks
+    // have, if we see multiple answers with same counts from all task results
+    // we retry and wait for more results
+    // max_count count number of results having same max count
+    let mut max_count = 0;
+    // max_answer is number of results having max answer
+    let mut max_answer = 0;
+    let mut answer = String::new();
+    // Safe to unwrap as answers should have at least one key
+    let mut result_payload: ResultPayload = serde_json::from_str(answers.clone().into_keys().last().unwrap().as_str())?;
+    for (result, count) in answers {
+        if count == max_answer {
+            max_count += 1;
+        } else if count > max_answer {
+            max_count = 1;
+            max_answer = count;
+            result_payload = serde_json::from_str(result.as_str())?;
         }
-        if processing_count > 0 {
-            tracing::debug!("Waiting for more results for event id: {}", event_id);
-            continue;
+    }
+    // This is when we are going to retry because there is not a single
+    // answer occurs more than any others
+    let mut accepted_result: Option<String> = None;
+    if max_count == 1 {
+        tracing::debug!("Accepted result is: {} ", answer);
+        accepted_result = Some(answer);
+    }
+    let winners = get_winners(tasks, accepted_result);
+    // TODO(wangjun.hong): Replace below with a single update
+
+    if !winners.is_empty() {
+        tracing::debug!("Winners: {:?}", winners);
+        reward(assign_event_id.clone(), &winners, result_payload, collection, 1).await;
+    }
+
+    Ok(())
+}
+
+/**
+Go through all tasks and return a list of updated tasks based on result
+When result is None, all tasks are set to retry, when result is not None,
+only tasks with same results are marked as succeeded, all others are failed
+**/
+fn get_winners(
+    tasks: &Vec<AssignerTask>,
+    result: Option<String>
+) -> Vec<Sender> {
+    let mut winners: Vec<Sender> = vec![];
+    tasks.iter().for_each(|task| {
+        let task_result = get_task_identifier(task);
+        if task_result == result && !task_result.is_none() {
+            winners.push(task.worker.clone());
         }
-        tracing::debug!("All results has been collected for event id: {}", event_id);
-        // max_count count number of results having same max count
-        let mut max_count = 0;
-        // max_answer is number of results having max answer
-        let mut max_answer = 0;
-        let mut answer: String = "".to_string();
-        for result in answers.keys() {
-            let count = answers.get(result).unwrap().to_owned();
-            if count == max_answer {
-                max_count += 1;
-            } else if { count > max_answer } {
-                max_count = 1;
-                max_answer = count;
-                answer = result.clone();
+    });
+
+    winners
+}
+
+fn get_task_identifier(
+    task: &AssignerTask
+) -> Option<String> {
+    match task.get_result_identifier() {
+        Ok(Some(val)) => {
+            if !val.is_empty() {
+                return Some(val);
             }
+            None
         }
-        let mut tasks_to_update: Vec<AssignerTask> = vec![];
-        if max_count > 1 {
-            tracing::debug!("There are {} results having same count: {}. We need to ask assign same task to more workers.", max_count, max_answer);
-            // Now let's mark all tasks with results as RETRY
-            for task in tasks_by_event.get(event_id).unwrap() {
-                if !task.result.is_empty() {
-                    tasks_to_update.push(AssignerTask {
-                        worker: task.worker.clone(),
-                        event_id: task.event_id.clone(),
-                        status: AssignerTaskStatus::Retry,
-                        created_at: task.created_at,
-                        expires_at: task.expires_at,
-                        result: task.result.clone(),
-                    });
-                }
-            }
-        } else {
-            // Now let's award the winners
-            let mut winners: Vec<Sender> = vec![];
-            for task in tasks_by_event.get(event_id).unwrap() {
-                let result_identifier = task.get_result_identifier().unwrap_or("".to_string());
-                if result_identifier == answer {
-                    tasks_to_update.push(AssignerTask {
-                        worker: task.worker.clone(),
-                        event_id: task.event_id.clone(),
-                        status: AssignerTaskStatus::Succeeded,
-                        created_at: task.created_at,
-                        expires_at: task.expires_at,
-                        result: task.result.clone(),
-                    });
-                    winners.push(task.worker.clone());
-                } else if !task.result.is_empty() {
-                    tracing::debug!("result_identifier: {}", result_identifier);
-                    tracing::debug!("answer: {}", answer);
-                    tasks_to_update.push(AssignerTask {
-                        worker: task.worker.clone(),
-                        event_id: task.event_id.clone(),
-                        status: AssignerTaskStatus::Failed,
-                        created_at: task.created_at,
-                        expires_at: task.expires_at,
-                        result: task.result.clone(),
-                    });
-                }
-            }
-            tracing::debug!("Winners: {:?}", winners);
-            // job_type 1 as classifier
-            reward(
-                assign_event_id.clone(),
-                &winners,
-                payload.clone(),
-                finish_job_collection,
-                1,
-            )
-            .await;
+
+        Ok(None) => {
+            None
         }
-        // TODO(wangjun.hong): Replace below with a single update
-        collection
-            .insert_many(tasks_to_update, None)
-            .await
-            .expect("Failed to update tasks");
-        let delete_filter = doc! {
-            "event_id": event_id,
-            "status": {
-                "$in": [
-                    "Pending",
-                ],
-            }
-        };
-        collection
-            .delete_many(delete_filter, None)
-            .await
-            .expect("Failed to delete tasks");
+
+        Err(_) => {
+            None
+        }
     }
 }
 
@@ -597,69 +544,6 @@ async fn reward(
             false
         }
     }
-}
-
-async fn classifier_aggregate(
-    sender: &Sender,
-    payload: &ResultPayload,
-    collection: &Collection<AssignerTask>,
-) {
-    let filter = doc! {
-        "event_id": payload.header.raw_data_id.to_string(),
-        "worker": hex::encode(sender.to_bytes()),
-    };
-
-    tracing::debug!(
-        "Event id: {}, worker id: {}",
-        payload.header.raw_data_id.to_string(),
-        hex::encode(sender.to_bytes())
-    );
-
-    let task = collection.find_one(filter.clone(), None).await.unwrap();
-
-    if (task.is_none()) {
-        tracing::error!(
-            "No task found for worker: {}",
-            hex::encode(sender.to_bytes())
-        );
-        return;
-    }
-
-    tracing::debug!("Task found for worker: {}", hex::encode(sender.to_bytes()));
-
-    let worker_task = task.unwrap();
-
-    let current_timestamp = Utc::now().timestamp() as u64;
-    let mongo_error_message = format!(
-        "Failed to update task for event: {}, worker: {}",
-        payload.header.raw_data_id.to_string(),
-        hex::encode(sender.to_bytes())
-    );
-
-    tracing::debug!(
-        "Current timestamp: {}, expires at: {}",
-        current_timestamp,
-        worker_task.expires_at
-    );
-    if ((worker_task.expires_at as u64) < current_timestamp) {
-        tracing::error!(
-            "Task: {} is timed out",
-            payload.header.raw_data_id.to_string()
-        );
-        // Timeout should be AssignerTaskStatus::Timeout
-        let update = doc! {"$set": {"status": "Timeout"}};
-        collection
-            .update_one(filter.clone(), update, None)
-            .await
-            .expect(mongo_error_message.as_str());
-        return;
-    }
-
-    let update = doc! {"$set": {"result": payload.output.clone()}};
-    collection
-        .update_one(filter.clone(), update, None)
-        .await
-        .expect(mongo_error_message.as_str());
 }
 
 fn get_result_payload(ev: &RelayEvent) -> Result<ResultPayload> {
