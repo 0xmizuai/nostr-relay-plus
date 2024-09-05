@@ -455,12 +455,14 @@ async fn finalize_classification(
             let result_identifier = task.get_result_identifier();
             // tracing::info!("result_identifier: {}", result_identifier.to_string());
             if let Some(identifier) = result_identifier {
-                match answers.entry(identifier) {
-                    Entry::Occupied(mut entry) => {
-                        entry.insert(entry.get() + 1);
-                    }
-                    Entry::Vacant(entry) => {
-                        entry.insert(1);
+                if !identifier.is_empty() {
+                    match answers.entry(identifier) {
+                        Entry::Occupied(mut entry) => {
+                            entry.insert(entry.get() + 1);
+                        }
+                        Entry::Vacant(entry) => {
+                            entry.insert(1);
+                        }
                     }
                 }
             }
