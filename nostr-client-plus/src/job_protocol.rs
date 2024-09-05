@@ -103,16 +103,21 @@ impl JobType {
 }
 
 impl AssignerTask {
-    pub fn get_result_identifier(&self) -> String {
+    /**
+     * For now, only use the first item in array to compare results
+     * result example: [{"tag_id":2867,"distance":0.5045340279460676}]
+     * return example: 2867
+     */
+    pub fn get_result_identifier(&self) -> Option<String> {
         let result_arr: Vec<ClassifierJobOutput> =
             serde_json::from_str(self.result.as_str()).unwrap_or(vec![]);
         let answer = result_arr.get(0);
         match answer {
             None => {
-                return "".to_string();
+                return None;
             }
             Some(answer) => {
-                return answer.tag_id.to_string();
+                return Some(answer.tag_id.to_string());
             }
         }
     }

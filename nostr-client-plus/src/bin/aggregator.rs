@@ -453,9 +453,9 @@ async fn finalize_classification(
                 break;
             }
             let result_identifier = task.get_result_identifier();
-            tracing::info!("result_identifier: {}", result_identifier.to_string());
-            if !result_identifier.is_empty() {
-                match answers.entry(result_identifier) {
+            // tracing::info!("result_identifier: {}", result_identifier.to_string());
+            if let Some(identifier) = result_identifier {
+                match answers.entry(identifier) {
                     Entry::Occupied(mut entry) => {
                         entry.insert(entry.get() + 1);
                     }
@@ -505,7 +505,7 @@ async fn finalize_classification(
             // Now let's award the winners
             let mut winners: Vec<Sender> = vec![];
             for task in tasks_by_event.get(event_id).unwrap() {
-                let result_identifier = task.get_result_identifier();
+                let result_identifier = task.get_result_identifier().unwrap_or("".to_string());
                 if result_identifier == answer {
                     tasks_to_update.push(AssignerTask {
                         worker: task.worker.clone(),
