@@ -7,9 +7,9 @@ use mongodb::{Client as DbClient, Collection};
 use nostr_client_plus::__private::config::{load_config, AggregatorConfig};
 use nostr_client_plus::__private::metrics::get_metrics_app;
 use nostr_client_plus::client::Client;
-use nostr_client_plus::db::FinishedJobs;
+use nostr_client_plus::db::{ClassifierResult, FinishedJobs};
 use nostr_client_plus::job_protocol::{
-    AssignerTask, AssignerTaskStatus, Kind, ResultPayload,
+    AssignerTask, AssignerTaskStatus, ClassifierJobOutput, Kind, ResultPayload
 };
 use nostr_client_plus::redis::RedisEventOnWire;
 use nostr_client_plus::request::{Filter, Request};
@@ -26,11 +26,9 @@ use redis::{Commands, Connection, RedisError};
 use sha2::{Digest, Sha512};
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap};
-use std::os::macos::raw::stat;
 use std::sync::Arc;
 use std::time::Duration;
 use std::vec;
-use chrono::SecondsFormat::AutoSi;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -123,6 +121,8 @@ async fn run() -> Result<()> {
     let collection: Collection<FinishedJobs> = db.collection("finished_jobs");
     let task_collection: Collection<AssignerTask> =
         connection.database("assigner").collection("tasks");
+    let classifier_result_collection: Collection<ClassifierResult> =
+        connection.database("mine").collection("classifier_results");
 
     // Configure Redis
     let redis_url = std::env::var("REDIS_URL").expect("REDIS_URL is not set");
@@ -342,6 +342,7 @@ async fn run() -> Result<()> {
                 match finalize_classification(
                     &tasks,
                     assign_event_id,
+                    &classifier_result_collection,
                     &collection,
                 ).await {
                     Ok(_) => {
@@ -354,7 +355,7 @@ async fn run() -> Result<()> {
                 };
                 PENDING_JOBS.dec();
             } else {
-                redis_con.set(job_id.clone(), tasks);
+                redis_con.set(job_id.clone(), "");
             }
 
             if tasks.len() == 1 {
@@ -412,6 +413,7 @@ async fn run() -> Result<()> {
 async fn finalize_classification(
     tasks: &Vec<AssignerTask>,
     assign_event_id: String,
+    classifier_result_collection: &Collection<ClassifierResult>,
     collection: &Collection<FinishedJobs>,
 ) -> Result<()> {
     tracing::debug!("Finalizing classifications for event: {}", assign_event_id);
@@ -461,7 +463,8 @@ async fn finalize_classification(
 
     if !winners.is_empty() {
         tracing::debug!("Winners: {:?}", winners);
-        reward(assign_event_id.clone(), &winners, result_payload, collection, 1).await;
+        reward(assign_event_id.clone(), &winners, result_payload, classifier_result_collection, 
+        collection, 1).await;
     }
 
     Ok(())
@@ -490,7 +493,7 @@ fn get_winners(
 fn get_task_identifier(
     task: &AssignerTask
 ) -> Option<String> {
-    match task.get_result_identifier() {
+    match get_result_identifier(task.result.output.clone()) {
         Ok(Some(val)) => {
             if !val.is_empty() {
                 return Some(val);
@@ -512,6 +515,7 @@ async fn reward(
     assign_event_id: String,
     workers: &Vec<Sender>,
     payload: ResultPayload,
+    classifier_result_collection: &Collection<ClassifierResult>,
     collection: &Collection<FinishedJobs>,
     job_type: u16,
 ) -> bool {
@@ -520,6 +524,28 @@ async fn reward(
         assign_event_id
     );
     let raw_data_id = payload.header.raw_data_id.clone();
+    let result_identifier = get_result_identifier(payload.output.clone());
+    match result_identifier   {
+        Err(_) =>{},
+        Ok(None)=>{},
+        Ok(Some(tag_id)) =>{
+            // Save classifier result to db
+            let classifier_result = ClassifierResult {
+                _id: raw_data_id,
+                kv_key: payload.kv_key.clone(),
+                tag_id
+            };
+            match classifier_result_collection.insert_one(classifier_result, None).await {
+                Ok(_) => {
+                    tracing::info!("Write classifier result to db: {}", payload.kv_key.clone());
+                }
+                Err(err) => {
+                    tracing::error!("Cannot write classifier result to db: {}", err);
+                }
+            }
+        }
+    }
+
     let db_entry = FinishedJobs {
         _id: raw_data_id,
         workers: workers.clone(), // if we remove first, no need to clone but this is safer
@@ -544,11 +570,32 @@ async fn reward(
             false
         }
     }
+
 }
 
 fn get_result_payload(ev: &RelayEvent) -> Result<ResultPayload> {
     let res: ResultPayload = serde_json::from_str(ev.event.content.as_str())?;
     Ok(res)
+}
+
+ /**
+     * For now, only use the first item in array to compare results
+     * result example: [{"tag_id":2867,"distance":0.5045340279460676}]
+     * return example: 2867
+*/
+pub fn get_result_identifier(output:String) -> Result<Option<String>> {
+    tracing::debug!("output: {}", output);
+    let result_arr: Vec<ClassifierJobOutput> =
+        serde_json::from_str(output.as_str())?;
+    let answer = result_arr.get(0);
+    match answer {
+        None => {
+            Ok(None)
+        }
+        Some(answer) => {
+            Ok(Some(answer.tag_id.to_string()))
+        }
+    }
 }
 
 fn register_metrics() {

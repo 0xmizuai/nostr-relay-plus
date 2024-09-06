@@ -70,6 +70,7 @@ pub struct ResultPayload {
     pub header: PayloadHeader,
     pub output: String,
     pub version: String,
+    pub kv_key: String
 }
 
 #[derive(PartialEq, Serialize, Deserialize, Clone)]
@@ -101,27 +102,6 @@ impl JobType {
     }
 }
 
-impl AssignerTask {
-    /**
-     * For now, only use the first item in array to compare results
-     * result example: [{"tag_id":2867,"distance":0.5045340279460676}]
-     * return example: 2867
-     */
-    pub fn get_result_identifier(&self) -> Result<Option<String>> {
-        tracing::debug!("output: {}", self.result.output);
-        let result_arr: Vec<ClassifierJobOutput> =
-            serde_json::from_str(self.result.output.as_str())?;
-        let answer = result_arr.get(0);
-        match answer {
-            None => {
-                Ok(None)
-            }
-            Some(answer) => {
-                Ok(Some(answer.tag_id.to_string()))
-            }
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {
