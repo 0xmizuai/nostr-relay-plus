@@ -6,7 +6,7 @@ use nostr_client_plus::__private::errors::Unrecoverable;
 use nostr_client_plus::__private::metrics::get_metrics_app;
 use nostr_client_plus::client::Client;
 use nostr_client_plus::event::UnsignedEvent;
-use nostr_client_plus::job_protocol::{JobType, Kind, AssignerTask, AssignerTaskStatus, NewJobPayload};
+use nostr_client_plus::job_protocol::{JobType, Kind};
 use nostr_client_plus::request::{Filter, Request};
 use nostr_crypto::eoa_signer::EoaSigner;
 use nostr_crypto::sender_signer::SenderSigner;
@@ -15,7 +15,7 @@ use nostr_plus_common::relay_event::RelayEvent;
 use nostr_plus_common::relay_message::RelayMessage;
 use nostr_plus_common::sender::Sender;
 use prometheus::{IntCounter, IntGauge, Registry};
-use serde_json::{json, from_str};
+use serde_json::json;
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -24,7 +24,6 @@ use tokio::sync::Mutex;
 use tokio::time::{interval, sleep};
 use tokio_tungstenite::tungstenite::Message;
 use nostr_plus_common::logging::init_tracing;
-use chrono::Utc;
 
 mod utils;
 use crate::utils::get_single_tag_entry;
@@ -67,7 +66,6 @@ async fn run() -> Result<()> {
     let relay_url = std::env::var("RELAY_URL").unwrap_or("ws://127.0.0.1:3033".to_string());
     let raw_private_key = std::env::var("ASSIGNER_PRIVATE_KEY").expect("Missing private key");
     let min_hb = std::env::var("MIN_HB_VERSION").expect("Missing min HB version");
-    let db_url = std::env::var("MONGO_URL").expect("MONGO_URL is not set");
 
     // Command line parsing
     let args: Vec<String> = std::env::args().collect();
@@ -160,18 +158,7 @@ async fn run() -> Result<()> {
                 Some((workers, ev)) = pub_rx.recv() => {
                     tracing::debug!(r#"Sending "{}""#, ev.event.content);
                     let mut tags: Vec<Vec<String>> = Vec::with_capacity(workers.len());
-                    let event_id = hex::encode(ev.event.id);
-                    let event: NewJobPayload = match from_str(ev.event.content.as_str()) {
-                        Ok(val) => {
-                             val
-                        }
-                        Err(_) => {
-                            tracing::error!("Failed to parse content into NewJobPayload for event: {}", event_id);
-                            continue;
-                        }
-                    };
-                    tracing::debug!("Event id: {}", event_id);
-                    tags.push(vec!["e".to_string(), event_id.clone()]);
+                    tags.push(vec!["e".to_string(), hex::encode(ev.event.id)]);
                     for w in &workers {
                         tags.push(vec!["p".to_string(), hex::encode(w.to_bytes())]);
                     }
@@ -197,7 +184,7 @@ async fn run() -> Result<()> {
                                 match client_clone.lock().await.publish(event_clone.clone()).await {
                                     Ok(_) => break,
                                     Err(_) => {
-                                        tracing::warn!("Publishing {} failed, attempt {}\nRetrying", event_id, counter);
+                                        tracing::warn!("Publishing {} failed, attempt {}\nRetrying", hex::encode(event_clone.id()), counter);
                                         counter += 1;
                                         sleep(Duration::from_secs(2)).await;
                                     },
@@ -212,7 +199,7 @@ async fn run() -> Result<()> {
                                 }
                                 ASSIGNED_JOBS.inc();
                             } else {
-                                tracing::error!("Could not assign event {}", event_id);
+                                tracing::error!("Could not assign event {}", hex::encode(event_clone.id()));
                             }
                         });
                     } else {

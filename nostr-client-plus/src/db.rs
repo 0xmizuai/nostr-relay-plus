@@ -1,4 +1,4 @@
-use crate::{crypto::CryptoHash};
+use crate::crypto::CryptoHash;
 use crate::job_protocol::ResultPayload;
 use anyhow::Result;
 use futures::StreamExt;
@@ -33,6 +33,13 @@ pub struct FinishedJobs {
     pub result: ResultPayload,
     pub job_type: u16, // TODO:
     pub assign_event_id: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ClassifierResult {
+    pub _id: CryptoHash,
+    pub kv_key:String,
+    pub tag_id: String,
 }
 
 pub async fn select_many<T>(

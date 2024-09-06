@@ -7,9 +7,9 @@ use mongodb::{Client as DbClient, Collection};
 use nostr_client_plus::__private::config::{load_config, AggregatorConfig};
 use nostr_client_plus::__private::metrics::get_metrics_app;
 use nostr_client_plus::client::Client;
-use nostr_client_plus::db::FinishedJobs;
+use nostr_client_plus::db::{ClassifierResult, FinishedJobs};
 use nostr_client_plus::job_protocol::{
-    AssignerTask, AssignerTaskStatus, Kind, ResultPayload,
+    AssignerTask, ClassifierJobOutput, Kind, ResultPayload
 };
 use nostr_client_plus::redis::RedisEventOnWire;
 use nostr_client_plus::request::{Filter, Request};
@@ -22,15 +22,14 @@ use nostr_plus_common::relay_message::RelayMessage;
 use nostr_plus_common::sender::Sender;
 use nostr_plus_common::wire::EventOnWire;
 use prometheus::{IntCounter, IntGauge, Registry};
-use redis::{Commands, Connection, RedisError};
+use redis::{Commands, Connection, RedisError, RedisResult};
 use sha2::{Digest, Sha512};
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap};
-use std::os::macos::raw::stat;
 use std::sync::Arc;
 use std::time::Duration;
 use std::vec;
-use chrono::SecondsFormat::AutoSi;
+use serde_json::{from_str, json};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -119,10 +118,9 @@ async fn run() -> Result<()> {
     let connection = DbClient::with_uri_str(db_url.clone())
         .await
         .expect("Cannot connect to db");
-    let db = connection.database("mine_local");
-    let collection: Collection<FinishedJobs> = db.collection("finished_jobs");
-    let task_collection: Collection<AssignerTask> =
-        connection.database("assigner").collection("tasks");
+    let collection: Collection<FinishedJobs> = connection.database("mine_local").collection("finished_jobs");
+    let classifier_result_collection: Collection<ClassifierResult> =
+        connection.database("mine").collection("classifier_results");
 
     // Configure Redis
     let redis_url = std::env::var("REDIS_URL").expect("REDIS_URL is not set");
@@ -263,11 +261,8 @@ async fn run() -> Result<()> {
         let mut aggr_book: HashMap<String, (Vec<Sender>, ResultPayload)> = HashMap::new();
 
         while let Some((job_id, (sender, new_payload, assign_event_id))) = aggr_rx.recv().await {
-            tracing::debug!("Assign Event id: {}", assign_event_id);
-            tracing::debug!("Job id: {}", job_id);
             // TODO: parse JobType
             let job_type = new_payload.header.job_type;
-            tracing::debug!("Job type: {}", job_type);
             let n_winners = match job_type {
                 0 => 1,
                 1 => 3,
@@ -310,17 +305,35 @@ async fn run() -> Result<()> {
 
             // Falling below are logics for classification
             let raw_data_id = hex::encode(new_payload.header.raw_data_id.hash());
-            let saved_tasks: Result<Vec<AssignerTask>, RedisError> =
-                redis_con.get(job_id.clone());
+            let mut fetch_connection = redis_client.get_connection();
+            if fetch_connection.is_err() {
+                tracing::debug!("Failed to fetch redis connection, abort");
+                continue;
+            }
+
+            // First fetch all existing tasks
+            let saved_tasks: Result<String, RedisError> =
+                (&mut fetch_connection.unwrap()).get(raw_data_id.clone());
             let mut tasks: Vec<AssignerTask> = match saved_tasks {
                 Ok(val) => {
-                    val
+                    match from_str(val.as_str()) {
+                        Ok (t) => {
+                            t
+                        }
+
+                        Err(err) => {
+                            tracing::debug!("Failed to fetch tasks from redis for data: {}", raw_data_id.clone());
+                            Vec::new()
+                        }
+                    }
                 }
                 Err(_) => {
+                    PENDING_JOBS.inc();
                     Vec::new()
                 }
             };
 
+            // Then append new tasks in the end
             tasks.push(
                 AssignerTask {
                     worker: sender,
@@ -329,23 +342,30 @@ async fn run() -> Result<()> {
                 }
             );
 
-            if tasks.len() == n_winners {
-                // TODO(wangjun.hong): Remove key from redis
-                // match redis_con.del(raw_data_id) {
-                //     Ok(_) => {
-                //         tracing::debug!("Removed all entries from redis for key: {}", raw_data_id);
-                //     }
-                //     Err(_) => {
-                //         tracing::error!("Failed to remove all entries from redis for key: {}", raw_data_id);
-                //     }
-                // }
+            // When number of tasks equal to winner count, let's try to finalize
+            if tasks.iter().len() >= n_winners {
                 match finalize_classification(
                     &tasks,
                     assign_event_id,
+                    &classifier_result_collection,
                     &collection,
                 ).await {
                     Ok(_) => {
                         tracing::debug!("Successfully finalized data: {}", raw_data_id);
+                        // After finalized, let's remove all tasks related
+                        let mut delete_connection = redis_client.get_connection();
+                        if delete_connection.is_err() {
+                            tracing::debug!("Failed to fetch redis connection, abort");
+                            continue;
+                        }
+                        match delete_redis_key(&mut delete_connection.unwrap(), raw_data_id.clone()) {
+                            Ok(_) => {
+                                tracing::debug!("Removed all entries from redis for key: {}", raw_data_id);
+                            }
+                            Err(_) => {
+                                tracing::error!("Failed to remove all entries from redis for key: {}", raw_data_id);
+                            }
+                        };
                     }
                     Err(_) => {
                         tracing::debug!("Failed to finalized data: {}", raw_data_id);
@@ -354,11 +374,21 @@ async fn run() -> Result<()> {
                 };
                 PENDING_JOBS.dec();
             } else {
-                redis_con.set(job_id.clone(), tasks);
-            }
-
-            if tasks.len() == 1 {
-                PENDING_JOBS.inc();
+                // Otherwise let's just update the values in redis
+                let mut update_connection = redis_client.get_connection();
+                if update_connection.is_err() {
+                    tracing::debug!("Failed to fetch redis connection, abort");
+                    continue;
+                }
+                match save_task_to_redis(&mut update_connection.unwrap(), raw_data_id.clone(), tasks) {
+                    Ok(_) => {
+                        tracing::debug!("Successfully updated data: {}", raw_data_id);
+                    }
+                    Err(err) => {
+                        tracing::debug!("Failed to updated data: {}, err: {}", raw_data_id, err);
+                        RESULT_ERRORS.inc();
+                    }
+                }
             }
         }
     });
@@ -409,9 +439,16 @@ async fn run() -> Result<()> {
     Ok(())
 }
 
+/**
+This method tries to finalize all results returned for a single
+event_id, we figure out a result which majority of results having
+and mark that as the winner result, and only reward the workers
+with that result
+**/
 async fn finalize_classification(
     tasks: &Vec<AssignerTask>,
     assign_event_id: String,
+    classifier_result_collection: &Collection<ClassifierResult>,
     collection: &Collection<FinishedJobs>,
 ) -> Result<()> {
     tracing::debug!("Finalizing classifications for event: {}", assign_event_id);
@@ -420,7 +457,21 @@ async fn finalize_classification(
     // Let's first go through all tasks and construct a map of
     // answer -> count
     for task in tasks.iter() {
-        match answers.entry(serde_json::json!(task.result.clone()).to_string()) {
+        let identifier: String = match get_task_identifier(task) {
+            Some(val) => {
+                if val.is_empty() {
+                    tracing::debug!("Failed to get identifier");
+                    continue;
+                }
+                val
+            }
+
+            None => {
+                tracing::debug!("Failed to get identifier");
+                continue;
+            }
+        };
+        match answers.entry(identifier) {
             Entry::Occupied(mut entry) => {
                 entry.insert(entry.get() + 1);
             }
@@ -430,7 +481,7 @@ async fn finalize_classification(
         }
     }
 
-    // Let's check if there's a answer which majority of the tasks
+    // Let's check if there's an answer which majority of the tasks
     // have, if we see multiple answers with same counts from all task results
     // we retry and wait for more results
     // max_count count number of results having same max count
@@ -438,63 +489,62 @@ async fn finalize_classification(
     // max_answer is number of results having max answer
     let mut max_answer = 0;
     let mut answer = String::new();
-    // Safe to unwrap as answers should have at least one key
-    let mut result_payload: ResultPayload = serde_json::from_str(answers.clone().into_keys().last().unwrap().as_str())?;
     for (result, count) in answers {
         if count == max_answer {
             max_count += 1;
         } else if count > max_answer {
             max_count = 1;
             max_answer = count;
-            result_payload = serde_json::from_str(result.as_str())?;
+            answer = result;
         }
     }
     // This is when we are going to retry because there is not a single
     // answer occurs more than any others
     let mut accepted_result: Option<String> = None;
     if max_count == 1 {
-        tracing::debug!("Accepted result is: {} ", answer);
         accepted_result = Some(answer);
     }
-    let winners = get_winners(tasks, accepted_result);
+    let (result, winners) = get_winners(tasks, accepted_result);
     // TODO(wangjun.hong): Replace below with a single update
 
-    if !winners.is_empty() {
-        tracing::debug!("Winners: {:?}", winners);
-        reward(assign_event_id.clone(), &winners, result_payload, collection, 1).await;
+    if !winners.is_empty() && !result.is_none() {
+        reward(assign_event_id.clone(), &winners, result.unwrap(), classifier_result_collection,
+        collection, 1).await;
     }
 
     Ok(())
 }
 
 /**
-Go through all tasks and return a list of updated tasks based on result
-When result is None, all tasks are set to retry, when result is not None,
-only tasks with same results are marked as succeeded, all others are failed
+Go through all tasks and return all winners and the result payload
+When result is None, no winners are returned
 **/
 fn get_winners(
     tasks: &Vec<AssignerTask>,
     result: Option<String>
-) -> Vec<Sender> {
+) -> (Option<ResultPayload>, Vec<Sender>) {
+    tracing::debug!("Result is: {:?}", result);
     let mut winners: Vec<Sender> = vec![];
+    let mut result_payload: Option<ResultPayload> = None;
     tasks.iter().for_each(|task| {
         let task_result = get_task_identifier(task);
         if task_result == result && !task_result.is_none() {
             winners.push(task.worker.clone());
+            result_payload = Some(task.result.clone());
         }
     });
 
-    winners
+    (result_payload, winners)
 }
 
+// Return values from a task identifier, in case of
+// failure happened, return None
 fn get_task_identifier(
     task: &AssignerTask
 ) -> Option<String> {
-    match task.get_result_identifier() {
+    match get_result_identifier(task.result.output.clone()) {
         Ok(Some(val)) => {
-            if !val.is_empty() {
-                return Some(val);
-            }
+            return Some(val);
             None
         }
 
@@ -512,6 +562,7 @@ async fn reward(
     assign_event_id: String,
     workers: &Vec<Sender>,
     payload: ResultPayload,
+    classifier_result_collection: &Collection<ClassifierResult>,
     collection: &Collection<FinishedJobs>,
     job_type: u16,
 ) -> bool {
@@ -520,6 +571,28 @@ async fn reward(
         assign_event_id
     );
     let raw_data_id = payload.header.raw_data_id.clone();
+    let result_identifier = get_result_identifier(payload.output.clone());
+    match result_identifier   {
+        Err(_) =>{},
+        Ok(None)=>{},
+        Ok(Some(tag_id)) =>{
+            // Save classifier result to db
+            let classifier_result = ClassifierResult {
+                _id: raw_data_id,
+                kv_key: payload.kv_key.clone(),
+                tag_id
+            };
+            match classifier_result_collection.insert_one(classifier_result, None).await {
+                Ok(_) => {
+                    tracing::info!("Write classifier result to db: {}", payload.kv_key.clone());
+                }
+                Err(err) => {
+                    tracing::error!("Cannot write classifier result to db: {}", err);
+                }
+            }
+        }
+    }
+
     let db_entry = FinishedJobs {
         _id: raw_data_id,
         workers: workers.clone(), // if we remove first, no need to clone but this is safer
@@ -544,11 +617,37 @@ async fn reward(
             false
         }
     }
+
 }
 
 fn get_result_payload(ev: &RelayEvent) -> Result<ResultPayload> {
+    tracing::debug!("Content is: {}", (ev.event.content.as_str()));
     let res: ResultPayload = serde_json::from_str(ev.event.content.as_str())?;
     Ok(res)
+}
+
+ /**
+     * For now, only use the first item in array to compare results
+     * result example: [{"tag_id":2867,"distance":0.5045340279460676}]
+     * return example: 2867
+*/
+pub fn get_result_identifier(output:String) -> Result<Option<String>> {
+    tracing::debug!("output: {}", output);
+    let result_arr: Vec<ClassifierJobOutput> =
+        serde_json::from_str(output.as_str())?;
+    tracing::debug!("result_arr: {:?}", result_arr);
+    let answer = result_arr.get(0);
+    tracing::debug!("answer is : {:?}", answer);
+    match answer {
+        None => {
+            tracing::debug!("Returning none as identifier");
+            Ok(None)
+        }
+        Some(answer) => {
+            tracing::debug!("Returning identifier: {}", answer.tag_id.to_string());
+            Ok(Some(answer.tag_id.to_string()))
+        }
+    }
 }
 
 fn register_metrics() {
@@ -574,12 +673,25 @@ fn save_event_to_redis(redis_con: &mut Connection, event: EventOnWire) -> Result
     let key = hex::encode(event.id);
     let redis_event = RedisEventOnWire {
         id: key.clone(),
-        sender: hex::encode(event.sender.to_bytes()),
-        tags: event.tags,
+        sender: hex::encode(event.sender.to_bytes()), tags: event.tags,
         content: event.content,
     };
 
     redis_con.set(key.clone(), redis_event)?;
+    Ok(())
+}
+
+// This method helps us to save tasks to redis
+fn save_task_to_redis(redis_con: &mut Connection, id: String, tasks: Vec<AssignerTask>) -> Result<()> {
+    redis_con.set(id, serde_json::json!(tasks).to_string())?;
+
+    Ok(())
+}
+
+// This method helps to remove a redis key
+fn delete_redis_key(redis_con: &mut Connection, id: String) -> Result<()> {
+    redis_con.del(id)?;
+
     Ok(())
 }
 
@@ -640,7 +752,7 @@ fn handle_binary(msg: &[u8]) -> Result<()> {
         BinaryMessage::QuerySubscription => return Err(anyhow!("Unexpected QuerySubscription")),
         BinaryMessage::ReplySubscription(count) => {
             tracing::info!("Active subscriptions: {}", count)
-        }
+       }
     }
     Ok(())
 }

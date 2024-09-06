@@ -33,7 +33,7 @@ async fn run() -> Result<()> {
     let relay_url = std::env::var("RELAY_URL").unwrap_or("ws://127.0.0.1:3033".to_string());
     let raw_private_key =
         std::env::var("PUBLISHER_PRIVATE_KEY").expect("Missing PUBLISHER_PRIVATE_KEY");
-    // let metrics_server = std::env::var("PROMETHEUS_URL").expect("Missing PROMETHEUS_URL");
+    let metrics_server = std::env::var("PROMETHEUS_URL").expect("Missing PROMETHEUS_URL");
     let low_val_jobs = std::env::var("JOBS_THRESHOLD").unwrap_or(LOW_VAL_JOBS.to_string());
     let low_val_jobs: usize = low_val_jobs.parse()?;
 
@@ -49,11 +49,11 @@ async fn run() -> Result<()> {
     };
 
     // Check if jobs are low and, if not, exit
-    // let queued_jobs = get_queued_jobs(metrics_server.as_str(), "cached_jobs").await?;
-    // if queued_jobs > low_val_jobs {
-    //     eprintln!("Enough jobs in the queue");
-    //     return Ok(());
-    // }
+    let queued_jobs = get_queued_jobs(metrics_server.as_str(), "cached_jobs").await?;
+    if queued_jobs > low_val_jobs {
+        eprintln!("Enough jobs in the queue");
+        return Ok(());
+    }
 
     // Configure DB from args
     let db = DbClient::with_uri_str(db_url)
