@@ -19,3 +19,6 @@ surrealdb
 cache
 
 scripts/mizu-services
+
+.idea
+

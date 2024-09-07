@@ -123,6 +123,8 @@ async fn run() -> Result<()> {
             header,
             kv_key: entry.r2_key,
             config: None,
+            validator: "default".to_string(),
+            classifier: "default".to_string(),
         };
         let event = UnsignedEvent::new(
             client.sender(),

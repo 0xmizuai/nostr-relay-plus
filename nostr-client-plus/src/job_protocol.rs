@@ -1,6 +1,8 @@
 use crate::crypto::CryptoHash;
+use nostr_plus_common::sender::Sender;
 use nostr_plus_common::types::Timestamp;
 use serde::{Deserialize, Serialize};
+use redis_macros::{FromRedisValue, ToRedisArgs};
 use strum_macros::{AsRefStr, EnumString};
 
 // ToDo: this just a placeholder struct
@@ -35,11 +37,21 @@ pub struct PayloadHeader {
     pub time: Timestamp,
 }
 
+#[derive(Serialize, Deserialize, FromRedisValue, ToRedisArgs, Clone)]
+pub struct AssignerTask {
+    pub worker: Sender,
+    pub event_id: String,
+    pub result: ResultPayload,
+    // TODO(wangjun.hong): Figure out how to support timeout and retry
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct NewJobPayload {
     pub header: PayloadHeader,
     pub kv_key: String,
     pub config: Option<AIRuntimeConfig>,
+    pub validator: String,
+    pub classifier: String,
 }
 
 #[derive(PartialEq, Eq, Serialize, Deserialize, Clone)]
@@ -47,6 +59,12 @@ pub struct ResultPayload {
     pub header: PayloadHeader,
     pub output: String,
     pub version: String,
+    pub kv_key: String
+}
+
+#[derive(PartialEq, Serialize, Deserialize, Clone, Debug)]
+pub struct ClassifierJobOutput {
+    pub tag_id: u16,
 }
 
 #[derive(AsRefStr, EnumString, PartialEq)]
@@ -72,6 +90,7 @@ impl JobType {
         }
     }
 }
+
 
 #[cfg(test)]
 mod tests {
