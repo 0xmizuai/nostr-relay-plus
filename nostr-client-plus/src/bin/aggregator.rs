@@ -316,14 +316,16 @@ async fn run() -> Result<()> {
                         }
 
                         Err(err) => {
-                            tracing::debug!("Failed parse tasks, error: {}", err);
-                            Vec::new()
+                            tracing::error!("Failed parse tasks, error: {}", err);
+                            // Skip this task since the stored tasks are corrupted
+                            continue;
                         }
                     }
                 }
                 Err(err) => {
-                    tracing::debug!("Failed to fetch tasks from redis for data: {}, error: {}", raw_data_id.clone(), err);
-                    Vec::new()
+                    tracing::error!("Failed to fetch tasks from redis for data: {}, error: {}", raw_data_id.clone(), err);
+                    // Skip this task since something wrong with redis
+                    continue;
                 }
             };
 
@@ -337,7 +339,7 @@ async fn run() -> Result<()> {
             );
 
             // When number of tasks equal to winner count, let's try to finalize
-            if tasks.iter().len() >= n_winners {
+            if tasks.len() == n_winners {
                 match finalize_classification(
                     &tasks,
                     assign_event_id,
@@ -356,8 +358,8 @@ async fn run() -> Result<()> {
                             }
                         };
                     }
-                    Err(_) => {
-                        tracing::debug!("Failed to finalized data: {}", raw_data_id);
+                    Err(err) => {
+                        tracing::error!("Failed to finalized data: {}, error: {}", raw_data_id, err);
                         RESULT_ERRORS.inc();
                     }
                 };
@@ -369,7 +371,7 @@ async fn run() -> Result<()> {
                         tracing::debug!("Successfully updated data: {}", raw_data_id);
                     }
                     Err(err) => {
-                        tracing::debug!("Failed to updated data: {}, err: {}", raw_data_id, err);
+                        tracing::error!("Failed to updated data: {}, err: {}", raw_data_id, err);
                         RESULT_ERRORS.inc();
                     }
                 }
@@ -444,14 +446,14 @@ async fn finalize_classification(
         let identifier: String = match get_task_identifier(task) {
             Some(val) => {
                 if val.is_empty() {
-                    tracing::debug!("Failed to get identifier");
+                    tracing::error!("Get empty identifier from: {}", task.result.output);
                     continue;
                 }
                 val
             }
 
             None => {
-                tracing::debug!("Failed to get identifier");
+                tracing::error!("Get identifier as None from: {}", task.result.output);
                 continue;
             }
         };
@@ -489,7 +491,6 @@ async fn finalize_classification(
         accepted_result = Some(answer);
     }
     let (result, winners) = get_winners(tasks, accepted_result);
-    // TODO(wangjun.hong): Replace below with a single update
 
     if !winners.is_empty() && !result.is_none() {
         reward(assign_event_id.clone(), &winners, result.unwrap(), classifier_result_collection,
@@ -534,7 +535,7 @@ fn get_task_identifier(
             None
         }
         Err(err) => {
-            tracing::debug!("Failed to parse identifier, error: {}", err);
+            tracing::error!("Failed to parse identifier, error: {}", err);
             None
         }
     }
@@ -554,9 +555,15 @@ async fn reward(
     );
     let raw_data_id = payload.header.raw_data_id.clone();
     let result_identifier = get_result_identifier(payload.output.clone());
-    match result_identifier   {
-        Err(_) =>{},
-        Ok(None)=>{},
+    match result_identifier {
+        Err(_) =>{
+            tracing::error!("Failed to get the identifier from the result: {}", payload.output);
+            return false;
+        },
+        Ok(None)=>{
+            tracing::error!("Get identifier as None from the result: {}", payload.output);
+            return false;
+        },
         Ok(Some(tag_id)) =>{
             // Save classifier result to db
             let classifier_result = ClassifierResult {
@@ -570,6 +577,8 @@ async fn reward(
                 }
                 Err(err) => {
                     tracing::error!("Cannot write classifier result to db: {}", err);
+                    FAILED_JOBS.inc();
+                    return false;
                 }
             }
         }
@@ -593,7 +602,6 @@ async fn reward(
             true
         }
         Err(err) => {
-            // We log and that's it, we keep the entry in book for later inspection
             tracing::error!("Cannot write finished job to db: {}", err);
             FAILED_JOBS.inc();
             false
@@ -615,12 +623,8 @@ fn get_result_payload(ev: &RelayEvent) -> Result<ResultPayload> {
 */
 pub fn get_result_identifier(output:String) -> Result<Option<String>> {
     tracing::debug!("output: {}", output);
-    let result_arr: Vec<ClassifierJobOutput> =
-        serde_json::from_str(output.as_str())?;
-    tracing::debug!("result_arr: {:?}", result_arr);
-    let answer = result_arr.get(0);
-    tracing::debug!("answer is : {:?}", answer);
-    match answer {
+    let result_arr: Vec<ClassifierJobOutput> = from_str(output.as_str())?;
+    match result_arr.get(0) {
         None => {
             tracing::debug!("Returning none as identifier");
             Ok(None)
