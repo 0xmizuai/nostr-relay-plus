@@ -116,7 +116,8 @@ async fn run() -> Result<()> {
     let connection = DbClient::with_uri_str(db_url.clone())
         .await
         .expect("Cannot connect to db");
-    let db = connection.database("mine");
+    // TODO(wangjun.hong): Store results in "mine" maybe, we need to keep this same as whatever database we use in publisher
+    let db = connection.database("test-preprocessor");
     let collection: Collection<FinishedJobs> = db.collection("finished_jobs");
     let classifier_result_collection: Collection<ClassifierResult> = db.collection("classifier_results");
 
