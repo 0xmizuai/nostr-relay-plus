@@ -38,7 +38,7 @@ async fn run() -> Result<()> {
     let metrics_server = std::env::var("PROMETHEUS_URL").expect("Missing PROMETHEUS_URL");
     let low_val_jobs = std::env::var("JOBS_THRESHOLD").unwrap_or(LOW_VAL_JOBS.to_string());
     let low_val_jobs: usize = low_val_jobs.parse()?;
-    // Percentage (0-100) of Classifications jobs. Remainder is PoW jobs.
+    // Percentage (0-100) of classification jobs. Remainder is PoW jobs.
     let classification_job_percentage = match std::env::var("CLASSIFICATION_PERCENT")
         .unwrap_or("100".to_string())
         .parse::<u8>()
@@ -163,12 +163,19 @@ async fn run() -> Result<()> {
             validator: "default".to_string(),
             classifier: "default".to_string(),
         };
+        let content = match serde_json::to_string(&payload) {
+            Ok(val) => val,
+            Err(err) => {
+                eprintln!("Failed to serialize payload: {}", err);
+                continue;
+            }
+        };
         let event = UnsignedEvent::new(
             client.sender(),
             timestamp_now,
             Kind::NEW_JOB,
             vec![vec!["t".to_string(), classification_type_str.to_string()]],
-            serde_json::to_string(&payload).expect("Payload serialization failed"),
+            content,
         );
         if client.publish(event).await.is_err() {
             eprintln!("Cannot publish job");
@@ -195,12 +202,19 @@ async fn run() -> Result<()> {
             validator: "default".to_string(),
             classifier: "default".to_string(),
         };
+        let content = match serde_json::to_string(&payload) {
+            Ok(val) => val,
+            Err(err) => {
+                eprintln!("Failed to serialize payload: {}", err);
+                continue;
+            }
+        };
         let event = UnsignedEvent::new(
             client.sender(),
             timestamp_now,
             Kind::NEW_JOB,
             vec![vec!["t".to_string(), pow_type_str.to_string()]],
-            serde_json::to_string(&payload).expect("Payload serialization failed"),
+            content,
         );
         if client.publish(event).await.is_err() {
             eprintln!("Cannot publish job");
