@@ -2,12 +2,14 @@ use anyhow::Result;
 use mongodb::bson::from_document;
 use mongodb::{Client as DbClient, Collection};
 use nostr_client_plus::client::Client;
+use nostr_client_plus::crypto::CryptoHash;
 use nostr_client_plus::db::{left_anti_join, RawDataEntry};
 use nostr_client_plus::event::UnsignedEvent;
 use nostr_client_plus::job_protocol::{JobType, Kind, NewJobPayload, PayloadHeader};
 use nostr_crypto::eoa_signer::EoaSigner;
 use nostr_crypto::sender_signer::SenderSigner;
 use nostr_plus_common::relay_message::RelayMessage;
+use rand::random;
 use std::convert::TryInto;
 use std::time::Duration;
 use tokio::time::{interval, Instant};
@@ -36,6 +38,26 @@ async fn run() -> Result<()> {
     let metrics_server = std::env::var("PROMETHEUS_URL").expect("Missing PROMETHEUS_URL");
     let low_val_jobs = std::env::var("JOBS_THRESHOLD").unwrap_or(LOW_VAL_JOBS.to_string());
     let low_val_jobs: usize = low_val_jobs.parse()?;
+    // Percentage (0-100) of classification jobs. Remainder is PoW jobs.
+    let classification_job_percentage = match std::env::var("CLASSIFICATION_PERCENT")
+        .unwrap_or("100".to_string())
+        .parse::<u8>()
+    {
+        Ok(val) => {
+            // check range
+            match val {
+                0..=100 => val,
+                _ => panic!("CLASSIFICATION_PERCENT must be in range [0, 100]"),
+            }
+        }
+        Err(err) => {
+            panic!("Failed to parse CLASSIFICATION_PERCENT to u8: {err}");
+        }
+    };
+    println!(
+        "{}% of all jobs published should be classification job",
+        classification_job_percentage
+    );
 
     // Command line parsing
     let args: Vec<String> = std::env::args().collect();
@@ -104,18 +126,33 @@ async fn run() -> Result<()> {
 
     let timestamp_now = chrono::Utc::now().timestamp() as u64;
 
+    // Let's figure out number of classifications and pow to send out
+    let classification_count = (limit_publish * classification_job_percentage as i64) / 100_i64;
+    println!(
+        "Plan to publish {} classification jobs",
+        classification_count
+    );
+
+    // Now let's fetch all classification entries needed.
+    // ToDo: probably if we have fewer classification jobs and fill the rest with PoW is not
+    //  what we want. Review it later.
     let entries = left_anti_join(&collection, "finished_jobs", limit_publish).await?;
+    println!(
+        "Actually fetched {} classifications to publish: PoW will fill the rest",
+        entries.len()
+    );
+    let pow_entries = limit_publish - entries.len() as i64;
 
-    // Get type job id and name
-    let job_type = JobType::Classification.job_type();
-    let job_type_str = JobType::Classification.as_ref();
-
+    /*
+     * Publish classification jobs
+     */
+    let classification_type = JobType::Classification.job_type();
+    let classification_type_str = JobType::Classification.as_ref();
     let mut jobs_sent = 0;
     for entry in entries {
         let entry: RawDataEntry = from_document(entry)?;
-        println!("Entry {}", entry._id.to_string());
         let header = PayloadHeader {
-            job_type,
+            job_type: classification_type,
             raw_data_id: entry._id,
             time: timestamp_now,
         };
@@ -126,12 +163,58 @@ async fn run() -> Result<()> {
             validator: "default".to_string(),
             classifier: "default".to_string(),
         };
+        let content = match serde_json::to_string(&payload) {
+            Ok(val) => val,
+            Err(err) => {
+                eprintln!("Failed to serialize payload: {}", err);
+                continue;
+            }
+        };
         let event = UnsignedEvent::new(
             client.sender(),
             timestamp_now,
             Kind::NEW_JOB,
-            vec![vec!["t".to_string(), job_type_str.to_string()]],
-            serde_json::to_string(&payload).expect("Payload serialization failed"),
+            vec![vec!["t".to_string(), classification_type_str.to_string()]],
+            content,
+        );
+        if client.publish(event).await.is_err() {
+            eprintln!("Cannot publish job");
+        } else {
+            jobs_sent += 1;
+        }
+    }
+
+    /*
+     * Publish PoW jobs
+     */
+    let pow_type = JobType::PoW.job_type();
+    let pow_type_str = JobType::PoW.as_ref();
+    for _ in 0..pow_entries {
+        let header = PayloadHeader {
+            job_type: pow_type,
+            raw_data_id: CryptoHash::new(random()),
+            time: timestamp_now,
+        };
+        let payload = NewJobPayload {
+            header,
+            kv_key: "pow".to_string(),
+            config: None,
+            validator: "default".to_string(),
+            classifier: "default".to_string(),
+        };
+        let content = match serde_json::to_string(&payload) {
+            Ok(val) => val,
+            Err(err) => {
+                eprintln!("Failed to serialize payload: {}", err);
+                continue;
+            }
+        };
+        let event = UnsignedEvent::new(
+            client.sender(),
+            timestamp_now,
+            Kind::NEW_JOB,
+            vec![vec!["t".to_string(), pow_type_str.to_string()]],
+            content,
         );
         if client.publish(event).await.is_err() {
             eprintln!("Cannot publish job");
