@@ -68,11 +68,12 @@ cargo run --release --package nostr-client-plus --bin aggregator -- nostr-client
 ### Publishers
 
 Publisher needs a few environment variables:
-- `MONGO_URL` is mandatory.
+- `MONGO_URL` is mandatory (not used by pow jobs).
 - `RELAY_URL` is optional and it defaults to `ws://127.0.0.1:3031`.
 - `PUBLISHER_PRIVATE_KEY` is mandatory.
 - `PROMETHEUS_URL` is mandatory.
 - `JOBS_THRESHOLD` is optional and defaults to 5000.
+- `CLASSIFICATION_PERCENT` is optional and defaults to 100 (range is 0-100).
 
 The publisher(_pow) is basically a one-shot program, that will publish immediately N jobs to the relay.  
 When jobs are completed successfully, running it again won't pick up the same jobs, so it can be run in a cron-job.  
