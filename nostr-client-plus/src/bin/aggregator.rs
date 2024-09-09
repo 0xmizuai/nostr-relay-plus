@@ -306,19 +306,26 @@ async fn run() -> Result<()> {
             let raw_data_id = hex::encode(new_payload.header.raw_data_id.hash());
 
             // First fetch all existing tasks
-            let saved_tasks: Result<String, RedisError> =
+            let saved_tasks: Result<Option<String>, RedisError> =
                 (&mut redis_con_task).get(raw_data_id.clone());
             let mut tasks: Vec<AssignerTask> = match saved_tasks {
                 Ok(val) => {
-                    match from_str(val.as_str()) {
-                        Ok(val) => {
-                            val
+                    match val {
+                        Some(val) => {
+                            match from_str(val.as_str()) {
+                                Ok(val) => {
+                                    val
+                                }
+                                Err(err) => {
+                                    tracing::error!("Failed parse tasks, error: {}", err);
+                                    // Skip this task since the stored tasks are corrupted
+                                    continue;
+                                }
+                            }
                         }
-
-                        Err(err) => {
-                            tracing::error!("Failed parse tasks, error: {}", err);
-                            // Skip this task since the stored tasks are corrupted
-                            continue;
+                        None => {
+                            tracing::debug!("This is the first time we saw this event result");
+                            Vec::new()
                         }
                     }
                 }
@@ -347,16 +354,9 @@ async fn run() -> Result<()> {
                     &collection,
                 ).await {
                     Ok(_) => {
+                        // Note, we don't remove the data from redis, the data can stay in
+                        // redis for a while to be used as a reference later
                         tracing::debug!("Successfully finalized data: {}", raw_data_id);
-                        // After finalized, let's remove all tasks related
-                        match delete_redis_key(&mut redis_con_task, raw_data_id.clone()) {
-                            Ok(_) => {
-                                tracing::debug!("Removed all entries from redis for key: {}", raw_data_id);
-                            }
-                            Err(_) => {
-                                tracing::error!("Failed to remove all entries from redis for key: {}", raw_data_id);
-                            }
-                        };
                     }
                     Err(err) => {
                         tracing::error!("Failed to finalized data: {}, error: {}", raw_data_id, err);
@@ -670,13 +670,6 @@ fn save_event_to_redis(redis_con: &mut Connection, event: EventOnWire) -> Result
 // This method helps us to save tasks to redis
 fn save_task_to_redis(redis_con: &mut Connection, id: String, tasks: Vec<AssignerTask>) -> Result<()> {
     redis_con.set(id, serde_json::json!(tasks).to_string())?;
-
-    Ok(())
-}
-
-// This method helps to remove a redis key
-fn delete_redis_key(redis_con: &mut Connection, id: String) -> Result<()> {
-    redis_con.del(id)?;
 
     Ok(())
 }
