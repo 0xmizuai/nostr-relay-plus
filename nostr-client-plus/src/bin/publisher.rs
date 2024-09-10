@@ -17,7 +17,7 @@ use tokio::time::{interval, Instant};
 mod utils;
 use crate::utils::get_queued_jobs;
 
-const TIMEOUT: Duration = Duration::from_secs(10);
+const TIMEOUT: Duration = Duration::from_secs(30);
 const LOW_VAL_JOBS: usize = 5_000;
 
 #[tokio::main]
@@ -118,7 +118,7 @@ async fn run() -> Result<()> {
                     }
                 }
                 else => {
-                    println!("unhandled event");
+                    eprintln!("unhandled event");
                 }
             }
         }
@@ -136,7 +136,7 @@ async fn run() -> Result<()> {
     // Now let's fetch all classification entries needed.
     // ToDo: probably if we have fewer classification jobs and fill the rest with PoW is not
     //  what we want. Review it later.
-    let entries = left_anti_join(&collection, "finished_jobs", limit_publish).await?;
+    let entries = left_anti_join(&collection, "finished_jobs", classification_count).await?;
     println!(
         "Actually fetched {} classifications to publish: PoW will fill the rest",
         entries.len()
