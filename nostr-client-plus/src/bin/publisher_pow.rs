@@ -18,10 +18,12 @@ const LOW_VAL_JOBS: usize = 5_000;
 
 #[tokio::main]
 async fn main() {
+    println!("Starting Publisher");
     if let Err(err) = run().await {
         eprintln!("{}", err);
         std::process::exit(1);
     }
+    println!("Stopping Publisher");
 }
 
 async fn run() -> Result<()> {
