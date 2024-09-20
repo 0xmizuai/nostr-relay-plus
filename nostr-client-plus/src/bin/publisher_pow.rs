@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Context, Result};
 use nostr_client_plus::client::Client;
 use nostr_client_plus::crypto::CryptoHash;
 use nostr_client_plus::event::UnsignedEvent;
@@ -28,9 +28,8 @@ async fn run() -> Result<()> {
     // Define needed env variables
     dotenv::dotenv().ok();
     let relay_url = std::env::var("RELAY_URL").unwrap_or("ws://127.0.0.1:3033".to_string());
-    let raw_private_key =
-        std::env::var("PUBLISHER_PRIVATE_KEY").expect("Missing PUBLISHER_PRIVATE_KEY");
-    let metrics_server = std::env::var("PROMETHEUS_URL").expect("Missing PROMETHEUS_URL");
+    let raw_private_key = std::env::var("PUBLISHER_PRIVATE_KEY")?;
+    let metrics_server = std::env::var("PROMETHEUS_URL")?;
     let low_val_jobs = std::env::var("JOBS_THRESHOLD").unwrap_or(LOW_VAL_JOBS.to_string());
     let low_val_jobs: usize = low_val_jobs.parse()?;
 
@@ -38,7 +37,7 @@ async fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let limit_publish: i64 = match args.len() {
         1 => 10_000_i64,
-        2 => args[1].parse().expect("Invalid number"),
+        2 => args[1].parse().context("Invalid number")?,
         _ => {
             eprintln!("Too many arguments");
             return Ok(());
@@ -53,7 +52,9 @@ async fn run() -> Result<()> {
     }
 
     // Private key
-    let private_key = hex::decode(raw_private_key)?.try_into().unwrap();
+    let private_key: [u8; 32] = hex::decode(raw_private_key)?
+        .try_into()
+        .map_err(|_| anyhow!("Failed to convert vector to fixed-size array"))?;
 
     // Create client
     let signer = EoaSigner::from_bytes(&private_key);
@@ -117,7 +118,7 @@ async fn run() -> Result<()> {
             timestamp_now,
             Kind::NEW_JOB,
             vec![vec!["t".to_string(), job_type_str.to_string()]],
-            serde_json::to_string(&payload).expect("Payload serialization failed"),
+            serde_json::to_string(&payload).context("Payload serialization failed")?,
         );
         if client.publish(event).await.is_err() {
             eprintln!("Cannot publish job");

@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Context, Result};
 use mongodb::bson::from_document;
 use mongodb::{Client as DbClient, Collection};
 use nostr_client_plus::client::Client;
@@ -31,11 +31,10 @@ async fn main() {
 async fn run() -> Result<()> {
     // Define needed env variables
     dotenv::dotenv().ok();
-    let db_url = std::env::var("MONGO_URL").expect("MONGO_URL is not set");
+    let db_url = std::env::var("MONGO_URL")?;
     let relay_url = std::env::var("RELAY_URL").unwrap_or("ws://127.0.0.1:3033".to_string());
-    let raw_private_key =
-        std::env::var("PUBLISHER_PRIVATE_KEY").expect("Missing PUBLISHER_PRIVATE_KEY");
-    let metrics_server = std::env::var("PROMETHEUS_URL").expect("Missing PROMETHEUS_URL");
+    let raw_private_key = std::env::var("PUBLISHER_PRIVATE_KEY")?;
+    let metrics_server = std::env::var("PROMETHEUS_URL")?;
     let low_val_jobs = std::env::var("JOBS_THRESHOLD").unwrap_or(LOW_VAL_JOBS.to_string());
     let low_val_jobs: usize = low_val_jobs.parse()?;
     // Percentage (0-100) of classification jobs. Remainder is PoW jobs.
@@ -63,7 +62,7 @@ async fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let limit_publish: i64 = match args.len() {
         1 => 1000_i64,
-        2 => args[1].parse().expect("Invalid number"),
+        2 => args[1].parse().context("Invalid number")?,
         _ => {
             eprintln!("Too many arguments");
             return Ok(());
@@ -80,12 +79,14 @@ async fn run() -> Result<()> {
     // Configure DB from args
     let db = DbClient::with_uri_str(db_url)
         .await
-        .expect("Cannot connect to db")
+        .context("Cannot connect to db")?
         .database("test-preprocessor");
     let collection: Collection<RawDataEntry> = db.collection("raw_data");
 
     // Private key
-    let private_key = hex::decode(raw_private_key)?.try_into().unwrap();
+    let private_key = hex::decode(raw_private_key)?
+        .try_into()
+        .map_err(|_| anyhow!("Failed to convert vector to fixed-size array"))?;
 
     // Create client
     let signer = EoaSigner::from_bytes(&private_key);
