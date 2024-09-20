@@ -139,7 +139,12 @@ async fn run() -> Result<()> {
     // Now let's fetch all classification entries needed.
     // ToDo: probably if we have fewer classification jobs and fill the rest with PoW is not
     //  what we want. Review it later.
-    let entries = left_anti_join(&collection, "finished_jobs", classification_count).await?;
+    let entries = if classification_count > 0 {
+        // this function return an error if classification_count not > 0
+        left_anti_join(&collection, "finished_jobs", classification_count).await?
+    } else {
+        Vec::new()
+    };
     println!(
         "Actually fetched {} classifications to publish: PoW will fill the rest",
         entries.len()
