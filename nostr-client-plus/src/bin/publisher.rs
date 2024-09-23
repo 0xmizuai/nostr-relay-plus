@@ -34,6 +34,7 @@ async fn run() -> Result<()> {
     // Define needed env variables
     dotenv::dotenv().ok();
     let db_url = std::env::var("MONGO_URL")?;
+    let db_name = std::env::var("MONGO_DB_NAME")?;
     let relay_url = std::env::var("RELAY_URL").unwrap_or("ws://127.0.0.1:3033".to_string());
     let raw_private_key = std::env::var("PUBLISHER_PRIVATE_KEY")?;
     let metrics_server = std::env::var("PROMETHEUS_URL")?;
@@ -82,7 +83,7 @@ async fn run() -> Result<()> {
     let db = DbClient::with_uri_str(db_url)
         .await
         .context("Cannot connect to db")?
-        .database("test-preprocessor");
+        .database(db_name.as_str());
     let collection: Collection<RawDataEntry> = db.collection("raw_data");
 
     // Private key
