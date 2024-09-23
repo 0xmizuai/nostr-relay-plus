@@ -52,8 +52,12 @@ cargo run --release --package nostr-client-plus --bin assigner -- nostr-client-p
 ### Aggregator
 
 Aggregator accepts two environment variables: `RELAY_URL` amd `VERSION`.
-`RELAY_URL` is optional and it defaults to `ws://127.0.0.1:3031`.
-`VERSION` is optional and it defaults to `v0.0.1`.
+- `RELAY_URL` is optional and it defaults to `ws://127.0.0.1:3031`.
+- `VERSION` is optional and it defaults to `v0.0.1`.
+- `SKIP_POW_CHECK` is optional and it defaults to an empty string: only `true` will make skip PoW check
+- `MONGO_URL` is mandatory.
+- `MONGO_DB_NAME` is mandatory.
+- `REDIS_URL` is mandatory.
 
 
 ```shell
@@ -69,6 +73,7 @@ cargo run --release --package nostr-client-plus --bin aggregator -- nostr-client
 
 Publisher needs a few environment variables:
 - `MONGO_URL` is mandatory (not used by pow jobs).
+- `MONGO_DB_NAME` is mandatory.
 - `RELAY_URL` is optional and it defaults to `ws://127.0.0.1:3031`.
 - `PUBLISHER_PRIVATE_KEY` is mandatory.
 - `PROMETHEUS_URL` is mandatory.
@@ -79,7 +84,7 @@ The publisher(_pow) is basically a one-shot program, that will publish immediate
 When jobs are completed successfully, running it again won't pick up the same jobs, so it can be run in a cron-job.  
 It's better to wait for the jobs to be completed, otherwise the same jobs will be re-submitted (we are not tracking, yet,
 in-flight jobs).  
-Publishers will check the metrics of a Prometheus and, if the number of acched jobs is below a configurable threshold,
+Publishers will check the metrics of a Prometheus and, if the number of cached jobs is below a configurable threshold,
 it won't run.  
 This makes it, again, suitable in a cron-job.
 

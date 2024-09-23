@@ -113,11 +113,12 @@ async fn run() -> Result<()> {
 
     // Configure DB from env
     let db_url = std::env::var("MONGO_URL").expect("MONGO_URL is not set");
+    let db_name = std::env::var("MONGO_DB_NAME")?;
     let connection = DbClient::with_uri_str(db_url.clone())
         .await
         .expect("Cannot connect to db");
     // TODO(wangjun.hong): Store results in "mine" maybe, we need to keep this same as whatever database we use in publisher
-    let db = connection.database("test-preprocessor");
+    let db = connection.database(db_name.as_str());
     let collection: Collection<FinishedJobs> = db.collection("finished_jobs");
     let classifier_result_collection: Collection<ClassifierResult> = db.collection("classifier_results");
 
