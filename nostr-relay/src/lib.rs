@@ -3,7 +3,7 @@ mod ws;
 mod local;
 mod util;
 
-pub use ws::ws_wrapper;
+pub use ws::{ALLOWED_DOMAINS, ws_wrapper};
 pub use ws::global::GlobalState;
 
 // Used internally, not public API.
