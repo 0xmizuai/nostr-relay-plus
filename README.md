@@ -32,6 +32,21 @@ The following environment variable must be set
 SURREAL_URL
 SURREAL_USER
 SURREAL_PASS
+ALLOWED_DOMAINS
+```
+
+`ALLOWED_DOMAINS` is a comma separated list of allowed domains (spaces before and after commas are ignored).\
+Domain rules apply only to `https` connections. Insecure `http` connections are supposed to be handled
+at the network level, but they are always accepted by the server.\
+In order to allow any `https` connection, just put `any` in the env variable. `any` takes precedence, no matter
+if specific domains are listed.\
+A few examples:
+```shell
+my.domain, another.com, some.org # all allowed
+my.domain,another.com , some.ord # same, spaces do not matter
+any # allow accepted
+my.domain, any, another.domain # any wins, so everything is accepted
+ # empty is treated the same as missing, but if it was accepted it would be treated as if https is forbidden
 ```
 
 Logging is controlled by `RUST_LOG` (compliant with `env_logger` syntax) and `LOG_FORMAT`.

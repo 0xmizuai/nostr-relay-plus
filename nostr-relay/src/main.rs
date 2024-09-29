@@ -1,4 +1,3 @@
-use std::env;
 use std::net::SocketAddr;
 
 use anyhow::Result;
@@ -9,11 +8,19 @@ use nostr_plus_common::logging::init_tracing;
 use nostr_relay::__private::metrics::{
     metrics_handler, REGISTRY, RX_EVENT_COUNTER, TX_EVENT_COUNTER, WS_CONNECTIONS,
 };
-use nostr_relay::{ws_wrapper, GlobalState};
+use nostr_relay::{ws_wrapper, GlobalState, ALLOWED_DOMAINS};
 use tower_http::cors::CorsLayer;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Check needed env variables
+    if (*ALLOWED_DOMAINS).is_empty() {
+        // This variable is filled with content from env::ALLOWED_DOMAINS. If it's empty
+        // it means the env variable was either missing or empty.
+        eprintln!("ALLOWED_DOMAINS env variable not provided");
+        return Ok(());
+    }
+
     // Basic command line parsing
     let args: Vec<String> = std::env::args().collect();
     let mut is_local = true;
