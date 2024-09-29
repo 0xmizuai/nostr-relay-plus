@@ -3,7 +3,7 @@ use mongodb::bson::from_document;
 use mongodb::{Client as DbClient, Collection};
 use nostr_client_plus::client::Client;
 use nostr_client_plus::crypto::CryptoHash;
-use nostr_client_plus::db::{left_anti_join, RawDataEntry};
+use nostr_client_plus::db::{left_anti_join, ClassifierPublished, RawDataEntry};
 use nostr_client_plus::event::UnsignedEvent;
 use nostr_client_plus::job_protocol::{JobType, Kind, NewJobPayload, PayloadHeader};
 use nostr_crypto::eoa_signer::EoaSigner;
@@ -44,11 +44,10 @@ async fn main() {
 async fn run() -> Result<()> {
     let ctx = init_from_env()?;
 
-    // Check if jobs are low and, if not, exit
+    // Check if jobs are low and, if not, return
     let queued_jobs = get_queued_jobs(ctx.metrics_server.as_str(), "cached_jobs").await?;
     if queued_jobs > ctx.low_val_jobs {
-        eprintln!("Enough jobs in the queue");
-        return Ok(());
+        return Err(anyhow!("Enough jobs in the queue"));
     }
 
     // Configure DB from args
@@ -57,6 +56,8 @@ async fn run() -> Result<()> {
         .context("Cannot connect to db")?
         .database(ctx.db_name.as_str());
     let collection: Collection<RawDataEntry> = db.collection("raw_data");
+    let published_collection: Collection<ClassifierPublished> =
+        db.collection("classifier_published");
 
     // Private key
     let private_key = hex::decode(ctx.raw_private_key)?
@@ -115,12 +116,15 @@ async fn run() -> Result<()> {
     //  what we want. Review it later.
     let entries = if classification_count > 0 {
         // this function return an error if classification_count not > 0
-        left_anti_join(&collection, "finished_jobs", classification_count).await?
+        left_anti_join(&collection, "classifier_published", classification_count).await?
     } else {
         Vec::new()
     };
+    if (entries.len() as i64) < classification_count {
+        eprintln!("Not enough classification jobs to publish");
+    };
     println!(
-        "Actually fetched {} classifications to publish: PoW will fill the rest",
+        "Actually fetched {} classification jobs to publish: PoW will fill the rest",
         entries.len()
     );
     let pow_entries = ctx.limit_publish - entries.len() as i64;
@@ -162,6 +166,11 @@ async fn run() -> Result<()> {
         if client.publish(event).await.is_err() {
             eprintln!("Cannot publish job");
         } else {
+            let db_entry = ClassifierPublished { _id: entry._id };
+            match published_collection.insert_one(db_entry, None).await {
+                Ok(_) => {}
+                Err(err) => eprintln!("Failed to insert published classifier job: {}", err),
+            }
             jobs_sent += 1;
         }
     }

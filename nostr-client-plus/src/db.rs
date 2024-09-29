@@ -42,6 +42,11 @@ pub struct ClassifierResult {
     pub tag_id: String,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct ClassifierPublished {
+    pub _id: CryptoHash,
+}
+
 pub async fn select_many<T>(
     col: &Collection<T>,
     filter: Document,
