@@ -26,7 +26,6 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 use std::vec;
-use serde_json::from_str;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -448,7 +447,7 @@ fn get_result_payload(ev: &RelayEvent) -> Result<ResultPayload> {
 */
 pub fn get_result_identifier(output:String) -> Result<Option<String>> {
     tracing::debug!("output: {}", output);
-    let result_arr: Vec<ClassifierJobOutput> = from_str(output.as_str())?;
+    let result_arr: Vec<ClassifierJobOutput> = serde_json::from_str(output.as_str())?;
     match result_arr.get(0) {
         None => {
             tracing::debug!("Returning none as identifier");
@@ -499,18 +498,13 @@ fn validate_result_event(
 ) -> Result<bool> {
     let payload: ResultPayload = serde_json::from_str(event.content.as_str())?;
     let job_type = payload.header.job_type;
-    // POW event check
-    if job_type == 0 {
-        // Check assignee is Result Sender
-        if let Ok(Some(assignee)) = get_single_tag_entry('p', &assign_event.tags) {
-            if let Ok(assignee_hex) = hex::decode(assignee) {
-                if let Some(assignee_account) = Sender::from_bytes(&assignee_hex) {
-                    if assignee_account != event.sender {
-                        tracing::error!("Assignee mismatch");
-                        return Ok(false);
-                    }
-                } else {
-                    tracing::error!("Invalid p tag in assign_event");
+
+    // Check if sender is the official assignee
+    if let Ok(Some(assignee)) = get_single_tag_entry('p', &assign_event.tags) {
+        if let Ok(assignee_hex) = hex::decode(assignee) {
+            if let Some(assignee_account) = Sender::from_bytes(&assignee_hex) {
+                if assignee_account != event.sender {
+                    tracing::error!("Assignee mismatch");
                     return Ok(false);
                 }
             } else {
@@ -518,11 +512,17 @@ fn validate_result_event(
                 return Ok(false);
             }
         } else {
-            tracing::error!("Missing p tag in assign_event");
+            tracing::error!("Invalid p tag in assign_event");
             return Ok(false);
         }
+    } else {
+        tracing::error!("Missing p tag in assign_event");
+        return Ok(false);
+    }
 
-        if (skip_pow_check) {
+    // POW event check
+    if job_type == 0 {
+        if skip_pow_check {
             return Ok(true);
         }
 
