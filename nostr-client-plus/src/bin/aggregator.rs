@@ -303,11 +303,20 @@ async fn run() -> Result<()> {
                         assign_event_id,
                         &classifier_result_collection,
                         &collection,
-                    ).await {
-                        Ok(_) => tracing::debug!("Successfully finalized data: {}", raw_data_id),
+                    )
+                    .await
+                    {
+                        Ok(_) => {
+                            tracing::debug!("Successfully finalized data: {}", raw_data_id);
+                            FINISHED_JOBS.inc();
+                        }
                         Err(err) => {
-                            tracing::error!("Failed to finalized data: {}, error: {}", raw_data_id, err);
-                            RESULT_ERRORS.inc();
+                            tracing::error!(
+                                "Failed to finalized data: {}, error: {}",
+                                raw_data_id,
+                                err
+                            );
+                            FAILED_JOBS.inc();
                         }
                     };
                     PENDING_JOBS.dec();
@@ -407,10 +416,7 @@ async fn finalize_classification(
                     "Wrote classifier result to db: {}",
                     task.result.kv_key.clone()
                 ),
-                Err(err) => {
-                    FAILED_JOBS.inc();
-                    return Err(anyhow!("Cannot write classifier result to db: {}", err));
-                }
+                Err(err) => return Err(anyhow!("Cannot write classifier result to db: {}", err)),
             }
         }
     }
@@ -425,11 +431,8 @@ async fn finalize_classification(
         assign_event_id,
     };
     match collection.insert_one(db_entry, None).await {
-        Ok(_) => FINISHED_JOBS.inc(),
-        Err(err) => {
-            FAILED_JOBS.inc();
-            return Err(anyhow!("Cannot write finished job to db: {}", err));
-        }
+        Ok(_) => {}
+        Err(err) => return Err(anyhow!("Cannot write finished job to db: {}", err)),
     }
     Ok(())
 }
