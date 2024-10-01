@@ -67,6 +67,7 @@ pub struct ClassifierJobOutput {
     pub tag_id: u16,
 }
 
+#[repr(u16)]
 #[derive(AsRefStr, EnumString, PartialEq)]
 pub enum JobType {
     #[strum(serialize = "pow")]
@@ -86,7 +87,7 @@ impl JobType {
     pub fn workers(&self) -> usize {
         match self {
             JobType::PoW => 1,
-            JobType::Classification => 3,
+            JobType::Classification => 1,
         }
     }
 }
@@ -113,5 +114,17 @@ mod tests {
         assert_eq!("pow", job.as_ref());
         let job = JobType::Classification;
         assert_eq!("classification", job.as_ref());
+    }
+
+    #[test]
+    fn test_job_type_u16_repr() {
+        let job = JobType::PoW as u16;
+        assert_eq!(job, 0_u16);
+        let job = JobType::Classification as u16;
+        assert_eq!(job, 1_u16);
+        let job = JobType::PoW;
+        assert_eq!(job.job_type(), 0_u16);
+        let job = JobType::Classification;
+        assert_eq!(job.job_type(), 1_u16);
     }
 }
