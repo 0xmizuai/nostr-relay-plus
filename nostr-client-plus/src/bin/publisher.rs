@@ -116,7 +116,12 @@ async fn run() -> Result<()> {
     //  what we want. Review it later.
     let entries = if classification_count > 0 {
         // this function return an error if classification_count not > 0
-        left_anti_join(&collection, "classifier_published", classification_count).await?
+        left_anti_join(
+            &collection,
+            published_collection.name(),
+            classification_count,
+        )
+        .await?
     } else {
         Vec::new()
     };
@@ -166,7 +171,10 @@ async fn run() -> Result<()> {
         if client.publish(event).await.is_err() {
             eprintln!("Cannot publish job");
         } else {
-            let db_entry = ClassifierPublished { _id: entry._id };
+            let db_entry = ClassifierPublished {
+                _id: entry._id,
+                timestamp: timestamp_now,
+            };
             match published_collection.insert_one(db_entry, None).await {
                 Ok(_) => {}
                 Err(err) => eprintln!("Failed to insert published classifier job: {}", err),

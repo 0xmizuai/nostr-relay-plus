@@ -45,6 +45,7 @@ pub struct ClassifierResult {
 #[derive(Serialize, Deserialize)]
 pub struct ClassifierPublished {
     pub _id: CryptoHash,
+    pub timestamp: Timestamp,
 }
 
 pub async fn select_many<T>(
