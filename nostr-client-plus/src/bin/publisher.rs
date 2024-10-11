@@ -47,7 +47,8 @@ async fn run() -> Result<()> {
     // Check if jobs are low and, if not, return
     let queued_jobs = get_queued_jobs(ctx.metrics_server.as_str(), "cached_jobs").await?;
     if queued_jobs > ctx.low_val_jobs {
-        return Err(anyhow!("Enough jobs in the queue"));
+        tracing::info!("Enough jobs in the queue");
+        return Ok(());
     }
 
     // Configure DB from args
