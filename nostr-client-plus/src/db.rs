@@ -44,7 +44,7 @@ pub struct ClassifierResult {
 
 #[derive(Serialize, Deserialize)]
 pub struct ClassifierPublished {
-    pub _id: CryptoHash,
+    pub _id: String,
     pub timestamp: Timestamp,
 }
 
