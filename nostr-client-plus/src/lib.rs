@@ -7,6 +7,7 @@ pub mod event;
 pub mod job_protocol;
 pub mod redis;
 pub mod request;
+pub mod rest;
 
 // Used internally, not public API.
 #[doc(hidden)]

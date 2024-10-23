@@ -173,7 +173,7 @@ async fn run() -> Result<()> {
             eprintln!("Cannot publish job");
         } else {
             let db_entry = ClassifierPublished {
-                _id: entry._id,
+                _id: entry._id.to_string(),
                 timestamp: timestamp_now,
             };
             match published_collection.insert_one(db_entry, None).await {
