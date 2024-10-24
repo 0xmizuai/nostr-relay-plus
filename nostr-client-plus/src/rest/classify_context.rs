@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct ClassifyContext {
+    #[serde(rename = "r2Key")]
     pub r2_key: String,
+    #[serde(rename = "byteSize")]
     pub byte_size: usize,
     pub checksum: String,
 }
